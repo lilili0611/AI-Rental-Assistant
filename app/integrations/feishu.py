@@ -23,9 +23,8 @@ from app.config import settings
 logger = logging.getLogger("feishu")
 
 # 字段映射 (Spec 7.2)。value 为飞书表中的实际列名(对齐用户最新表结构)。
-# 注: 主列名为「设备编号」, 订单号写入该列。
 FIELD_MAPPING = {
-    "id": "设备编号",
+    "id": "订单号",
     "status": "订单状态",
     "rental_start": "租期开始",
     "rental_end": "租期结束",
@@ -33,6 +32,38 @@ FIELD_MAPPING = {
     "paid_amount": "已收金额",
     "payment_note": "收款备注",
 }
+
+# 飞书 -> AI 回流: 订单状态文本归一(接受中英文)
+_VALID_STATUS = {
+    "draft", "pending_payment", "paid", "confirmed", "shipped",
+    "active", "returned", "completed", "cancelled",
+}
+_STATUS_ALIASES = {
+    "草稿": "draft", "待支付": "pending_payment", "待付款": "pending_payment",
+    "已支付": "paid", "已付款": "paid", "已收款": "paid",
+    "已确认": "confirmed", "已审核": "confirmed", "已发货": "shipped",
+    "使用中": "active", "已签收": "active", "已归还": "returned",
+    "已完成": "completed", "已取消": "cancelled",
+}
+
+
+def _text(v) -> Optional[str]:
+    """飞书文本字段可能是字符串或富文本段数组, 统一取纯文本。"""
+    if v is None:
+        return None
+    if isinstance(v, list):
+        return "".join(seg.get("text", "") for seg in v if isinstance(seg, dict)) or None
+    return str(v)
+
+
+def _norm_status(v) -> Optional[str]:
+    s = _text(v)
+    if not s:
+        return None
+    s = s.strip()
+    if s in _VALID_STATUS:
+        return s
+    return _STATUS_ALIASES.get(s)
 
 _token_cache = {"token": None, "expire_at": 0.0}
 
@@ -140,11 +171,103 @@ def push_order(order) -> bool:
     return False
 
 
-def poll_changes_job():
-    """飞书 -> AI: 轮询最近变更 (由定时任务每 30 秒调用)。
+def _list_all_records(client: httpx.Client, token: str) -> list:
+    """分页拉取订单表全部记录。"""
+    items, page_token = [], None
+    headers = {"Authorization": f"Bearer {token}"}
+    for _ in range(50):  # 安全上限
+        params = {"page_size": 500}
+        if page_token:
+            params["page_token"] = page_token
+        data = client.get(_records_url(), headers=headers, params=params).json()
+        d = data.get("data", {}) or {}
+        items.extend(d.get("items", []) or [])
+        if d.get("has_more") and d.get("page_token"):
+            page_token = d["page_token"]
+        else:
+            break
+    return items
 
-    待实现: 拉取飞书表近期变更行, 按 last_modified_at 做冲突裁决后回写本地。
+
+def poll_changes_job():
+    """飞书 -> AI: 轮询飞书表, 把人工在飞书的改动回流到本地 (Spec 7)。
+
+    冲突策略(无飞书时间戳时的务实做法):
+      - 本地有未推送改动(sync_status=='sync_pending') -> 本地优先, 重推飞书, 跳过回流;
+      - 否则飞书值与本地不同 -> 视为人工在飞书修改 -> 回流更新本地(状态/已收/备注)。
+    同步后两边一致, 天然防回环。变更写 order_changes 审计, source 置 feishu。
     """
     if not _enabled():
         return
-    logger.debug("飞书轮询占位: 待凭证就绪后实现")
+    from decimal import Decimal
+
+    from app.database import SessionLocal
+    from app.models.order import Order, OrderChange
+
+    db = SessionLocal()
+    try:
+        token = get_tenant_token()
+        with httpx.Client(timeout=20) as client:
+            records = _list_all_records(client, token)
+        changed = 0
+        for it in records:
+            f = it.get("fields", {}) or {}
+            oid = _text(f.get(FIELD_MAPPING["id"]))
+            if not oid:
+                continue
+            order = db.get(Order, oid)
+            if not order:  # 飞书里的设备行等非本系统订单, 跳过
+                continue
+
+            # 本地有未推送改动 -> 本地优先, 重推飞书
+            if order.sync_status == "sync_pending":
+                if push_order(order):
+                    order.sync_status = "synced"
+                    db.commit()
+                continue
+
+            updates = {}
+            fstatus = _norm_status(f.get(FIELD_MAPPING["status"]))
+            if fstatus and fstatus != order.status:
+                updates["status"] = (order.status, fstatus)
+
+            fpaid_raw = f.get(FIELD_MAPPING["paid_amount"])
+            if fpaid_raw is not None and fpaid_raw != "":
+                try:
+                    fpaid = Decimal(str(fpaid_raw))
+                    if fpaid != order.paid_amount:
+                        updates["paid_amount"] = (order.paid_amount, fpaid)
+                except (ValueError, ArithmeticError):
+                    pass
+
+            fnote = _text(f.get(FIELD_MAPPING["payment_note"]))
+            if (fnote or None) != (order.payment_note or None):
+                updates["payment_note"] = (order.payment_note, fnote)
+
+            if not updates:
+                continue
+
+            # 回流: 飞书 -> 本地
+            if "status" in updates:
+                order.status = updates["status"][1]
+            if "paid_amount" in updates:
+                order.paid_amount = updates["paid_amount"][1]
+            if "payment_note" in updates:
+                order.payment_note = updates["payment_note"][1]
+            order.version += 1
+            order.source = "feishu"
+            order.sync_status = "synced"
+            db.add(OrderChange(
+                order_id=order.id, change_type="feishu_sync", changed_by=None,
+                old_value={k: str(v[0]) for k, v in updates.items()},
+                new_value={k: str(v[1]) for k, v in updates.items()},
+                reason="飞书回流",
+            ))
+            changed += 1
+        if changed:
+            db.commit()
+            logger.info("飞书回流: 更新 %d 单", changed)
+    except Exception:  # noqa: BLE001
+        logger.exception("飞书回流失败")
+    finally:
+        db.close()
