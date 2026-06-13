@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# 环境与密钥
+.env
+
+# 数据库
+*.db
+*.sqlite
+*.sqlite3
+
+# 系统
+.DS_Store
+
+# 日志
+*.log
+
+# 外部安装的技能 (通过 npx skills / git clone 安装，不纳入本仓库)
+.agents/
+.claude/skills/
+
+# Claude Code 本地个人设置
+.claude/settings.local.json
+
+# 一次性产物
+feishu_auth_qr.png
