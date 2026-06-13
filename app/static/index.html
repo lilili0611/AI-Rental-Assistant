@@ -55,11 +55,12 @@
   button:disabled{opacity:.45;cursor:not-allowed;transform:none;box-shadow:none}
   /* layout */
   .wrap{max-width:1160px;margin:0 auto;padding:22px 20px;display:grid;grid-template-columns:1fr 380px;gap:20px;align-items:start}
+  .wrap>div{min-width:0}
   @media(max-width:900px){.wrap{grid-template-columns:1fr}}
   .card{background:var(--surface);border:2px solid var(--line);border-radius:22px;padding:22px;box-shadow:var(--sh-sm);margin-bottom:20px}
   .reveal{opacity:0;transform:translateY(16px) scale(.98)}
   .reveal.in{opacity:1;transform:none;transition:opacity .5s var(--ease),transform .5s var(--bounce)}
-  .sechead{display:flex;align-items:center;gap:11px;margin-bottom:16px}
+  .sechead{display:flex;align-items:center;gap:11px;margin-bottom:16px;flex-wrap:wrap;row-gap:8px}
   .sechead .n{width:30px;height:30px;border-radius:50%;background:var(--brand);color:#fff;font-size:15px;font-weight:700;display:grid;place-items:center;flex:none;font-family:"Sora",sans-serif;box-shadow:0 4px 10px rgba(var(--brand-rgb),.3)}
   .sechead h2{font-size:20px}.sechead .sp{flex:1}
   .muted{color:var(--ink-3)}
