@@ -24,6 +24,8 @@ class User(Base, UUIDPKMixin, TimestampMixin):
     # (枚举可扩展为 sales/warehouse/finance/service, 见 PRD 待决策项1)
     role: Mapped[str] = mapped_column(String(20), default="customer")
     credit_score: Mapped[int] = mapped_column(Integer, default=100)
+    # 🆕 v2.2 后台登录口令哈希(仅 staff/admin 设置, PBKDF2 加盐)
+    password_hash: Mapped[Optional[str]] = mapped_column(String(255))
 
     addresses: Mapped[list["UserAddress"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"

@@ -31,6 +31,8 @@ FIELD_MAPPING = {
     "total_price": "应付金额",
     "paid_amount": "已收金额",
     "payment_note": "收款备注",
+    "carrier": "快递公司",      # 🆕 v2.1
+    "tracking_no": "物流单号",  # 🆕 v2.1
 }
 
 # 飞书 -> AI 回流: 订单状态文本归一(接受中英文)
@@ -40,10 +42,14 @@ _VALID_STATUS = {
 }
 _STATUS_ALIASES = {
     "草稿": "draft", "待支付": "pending_payment", "待付款": "pending_payment",
+    "商家审核中": "pending_payment",  # 🆕 v2.1 客户可见标签
     "已支付": "paid", "已付款": "paid", "已收款": "paid",
-    "已确认": "confirmed", "已审核": "confirmed", "已发货": "shipped",
-    "使用中": "active", "已签收": "active", "已归还": "returned",
-    "已完成": "completed", "已取消": "cancelled",
+    "已确认": "confirmed", "已审核": "confirmed",
+    "已确认档期": "confirmed", "已确认档期（待发货）": "confirmed", "待发货": "confirmed",  # 🆕 v2.1
+    "已发货": "shipped",
+    "使用中": "active", "已签收": "active", "已归还": "returned", "待验收": "returned",
+    "已完成": "completed", "订单已完结": "completed",  # 🆕 v2.1
+    "已取消": "cancelled",
 }
 
 
@@ -100,6 +106,41 @@ def _records_url() -> str:
     )
 
 
+def _fields_url() -> str:
+    return (
+        f"https://open.feishu.cn/open-apis/bitable/v1/apps/"
+        f"{settings.feishu_bitable_app_token}/tables/"
+        f"{settings.feishu_order_table_id}/fields"
+    )
+
+
+_fields_cache = {"names": None, "expire_at": 0.0}
+
+
+def _table_field_names(client: httpx.Client, token: str) -> set:
+    """读取飞书表实际存在的列名(带 5 分钟缓存)。
+
+    用于在写入前过滤掉表里还没有的列(如新加的「快递公司/物流单号」),
+    避免整条记录因 FieldNameNotFound 写入失败。读失败返回空集 -> 不过滤(回退旧行为)。
+    """
+    now = time.time()
+    if _fields_cache["names"] is not None and _fields_cache["expire_at"] > now:
+        return _fields_cache["names"]
+    try:
+        resp = client.get(
+            _fields_url(),
+            headers={"Authorization": f"Bearer {token}"},
+            params={"page_size": 100},
+        )
+        items = (resp.json().get("data", {}) or {}).get("items", []) or []
+        names = {it.get("field_name") for it in items if it.get("field_name")}
+    except Exception:  # noqa: BLE001
+        names = set()
+    _fields_cache["names"] = names
+    _fields_cache["expire_at"] = now + 300
+    return names
+
+
 def _build_fields(order) -> dict:
     """把订单对象转成飞书表字段。数字列传 number, 其余传文本字符串。"""
     return {
@@ -110,6 +151,8 @@ def _build_fields(order) -> dict:
         FIELD_MAPPING["rental_start"]: order.rental_start.isoformat(),
         FIELD_MAPPING["rental_end"]: order.rental_end.isoformat(),
         FIELD_MAPPING["payment_note"]: order.payment_note or "",
+        FIELD_MAPPING["carrier"]: order.carrier or "",
+        FIELD_MAPPING["tracking_no"]: order.tracking_no or "",
     }
 
 
@@ -148,6 +191,10 @@ def push_order(order) -> bool:
             token = get_tenant_token()
             with httpx.Client(timeout=15) as client:
                 headers = {"Authorization": f"Bearer {token}"}
+                # 过滤掉表里尚不存在的列(如未添加的快递公司/物流单号), 避免整条写入失败
+                known = _table_field_names(client, token)
+                if known:
+                    fields = {k: v for k, v in fields.items() if k in known}
                 record_id = _find_record_id(client, token, order.id)
                 if record_id:
                     resp = client.put(
@@ -244,6 +291,14 @@ def poll_changes_job():
             if (fnote or None) != (order.payment_note or None):
                 updates["payment_note"] = (order.payment_note, fnote)
 
+            fcarrier = _text(f.get(FIELD_MAPPING["carrier"]))
+            if (fcarrier or None) != (order.carrier or None):
+                updates["carrier"] = (order.carrier, fcarrier)
+
+            ftracking = _text(f.get(FIELD_MAPPING["tracking_no"]))
+            if (ftracking or None) != (order.tracking_no or None):
+                updates["tracking_no"] = (order.tracking_no, ftracking)
+
             if not updates:
                 continue
 
@@ -254,6 +309,10 @@ def poll_changes_job():
                 order.paid_amount = updates["paid_amount"][1]
             if "payment_note" in updates:
                 order.payment_note = updates["payment_note"][1]
+            if "carrier" in updates:
+                order.carrier = updates["carrier"][1]
+            if "tracking_no" in updates:
+                order.tracking_no = updates["tracking_no"][1]
             order.version += 1
             order.source = "feishu"
             order.sync_status = "synced"

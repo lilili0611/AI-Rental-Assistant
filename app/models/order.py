@@ -44,6 +44,12 @@ class Order(Base, TimestampMixin):
     paid_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=0)
     payment_note: Mapped[Optional[str]] = mapped_column(String(500))
 
+    # 🆕 v2.1 商家审核备注/驳回原因
+    review_note: Mapped[Optional[str]] = mapped_column(String(500))
+    # 🆕 v2.1 物流(商家手填, 前端只读展示, 不对接快递 API)
+    carrier: Mapped[Optional[str]] = mapped_column(String(50))
+    tracking_no: Mapped[Optional[str]] = mapped_column(String(100))
+
     rental_start: Mapped[date] = mapped_column(Date, nullable=False)
     rental_end: Mapped[date] = mapped_column(Date, nullable=False)
 

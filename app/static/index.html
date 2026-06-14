@@ -295,15 +295,16 @@ async function placeOrder(){
   toast('下单成功 🎉 '+d.order_id);clearQuote();loadOrders();
   addBub('a','你的订单 '+d.order_id+' 已创建（待支付），应付 ¥'+fmt(d.total_price)+'。\n'+d.payment_instruction);
 }
-const STMAP={draft:'草稿',pending_payment:'待支付',paid:'已付款',confirmed:'已审核',shipped:'已发货',active:'使用中',returned:'已归还',completed:'已完成',cancelled:'已取消'};
-function stChip(s){const cls=s==='cancelled'?'no':(s==='completed'?'ok':'warn');return `<span class="chip ${cls}"><span class="d"></span>${STMAP[s]||s}</span>`;}
+// 颜色分档: 取消=红, 完结=绿, 其余=黄(进行中)。文案用后端返回的 display_status。
+function stChip(o){const s=o.status;const cls=s==='cancelled'?'no':(s==='completed'?'ok':'warn');return `<span class="chip ${cls}"><span class="d"></span>${o.display_status||s}</span>`;}
 async function loadOrders(){
   if(!USER){$('orders').innerHTML='<span class="muted">登录后查看你的订单</span>';return;}
   const d=await (await fetch('/api/orders',{headers:hdrs()})).json();const list=d.data||[];
   if(!list.length){$('orders').innerHTML='<span class="muted">还没有订单，去上面挑一台吧 🛒</span>';return;}
   $('orders').innerHTML=list.map(o=>`<div class="o">
-    <div class="top"><span class="oid">${o.order_id}</span>${stChip(o.status)}</div>
+    <div class="top"><span class="oid">${o.order_id}</span>${stChip(o)}</div>
     <div class="sub tnum">租期 ${o.rental_start} ~ ${o.rental_end}　·　应付 ¥${fmt(o.total_price)}　·　押金 ¥${fmt(o.deposit)}</div>
+    ${o.tracking_no?`<div class="sub tnum">物流：${o.carrier||''} ${o.tracking_no}</div>`:''}
     ${o.status==='pending_payment'?`<button class="danger sm" style="margin-top:10px" onclick="cancelOrder('${o.order_id}',${o.version})">取消订单</button>`:''}
   </div>`).join('');
 }

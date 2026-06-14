@@ -11,12 +11,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, is_staff
+from app.api.deps import get_current_user, get_staff_user
 from app.database import get_db
 from app.models.camera import CameraConfig
 from app.models.order import Order
 from app.models.user import User
 from app.schemas.order import (
+    AcceptRequest,
     CancelResponse,
     OrderCreateRequest,
     OrderCreateResponse,
@@ -24,6 +25,8 @@ from app.schemas.order import (
     OrderItemOut,
     OrderOut,
     PaymentConfirmRequest,
+    ReviewRequest,
+    ShipRequest,
     StatusAdvanceRequest,
 )
 from app.services import order_service
@@ -37,6 +40,7 @@ def _order_out(order: Order) -> OrderOut:
     return OrderOut(
         order_id=order.id,
         status=order.status,
+        display_status=order_service.display_status(order),
         subtotal=order.subtotal,
         deposit=order.deposit_amount,
         discount_amount=order.discount_amount,
@@ -45,6 +49,10 @@ def _order_out(order: Order) -> OrderOut:
         rental_start=order.rental_start,
         rental_end=order.rental_end,
         version=order.version,
+        carrier=order.carrier,
+        tracking_no=order.tracking_no,
+        review_note=order.review_note,
+        user_id=order.user_id,
         items=[
             OrderItemOut(
                 camera_config_id=i.camera_config_id,
@@ -62,7 +70,8 @@ def _get_owned_order(db: Session, order_id: str, user: User) -> Order:
     order = db.get(Order, order_id)
     if not order:
         raise HTTPException(404, detail={"error": "订单不存在", "error_code": "not_found"})
-    if order.user_id != user.id and not is_staff(user):
+    # 🔴 v2.2: 租客端只能操作本人订单; 员工操作走 token 鉴权的后台接口(不靠可伪造的 X-User-Id)
+    if order.user_id != user.id:
         raise HTTPException(403, detail={"error": "无权访问该订单", "error_code": "forbidden"})
     return order
 
@@ -112,9 +121,25 @@ def list_orders(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    # 🔴 v2.2: 该接口只返回本人订单; 员工查看全部走 token 鉴权的 /orders/admin
+    stmt = select(Order).where(Order.user_id == user.id)
+    if status:
+        stmt = stmt.where(Order.status == status)
+    stmt = stmt.order_by(Order.created_at.desc())
+    rows = db.execute(stmt.offset((page - 1) * limit).limit(limit)).scalars().all()
+    return {"data": [_order_out(o) for o in rows], "page": page, "limit": limit}
+
+
+@router.get("/orders/admin")
+def list_orders_admin(
+    status: Optional[str] = None,
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_staff_user),
+):
+    """🆕 v2.1 商家端订单列表(全部用户)。🆕 v2.2 凭后台登录令牌。"""
     stmt = select(Order)
-    if not is_staff(user):
-        stmt = stmt.where(Order.user_id == user.id)
     if status:
         stmt = stmt.where(Order.status == status)
     stmt = stmt.order_by(Order.created_at.desc())
@@ -191,11 +216,9 @@ def confirm_payment(
     order_id: str,
     body: PaymentConfirmRequest,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_staff_user),
 ):
-    """🔴 人工确认收款。需 staff 权限。"""
-    if not is_staff(user):
-        raise HTTPException(403, detail={"error": "需员工权限", "error_code": "forbidden"})
+    """🔴 人工确认收款。🆕 v2.2 凭后台登录令牌。"""
     order = db.get(Order, order_id)
     if not order:
         raise HTTPException(404, detail={"error": "订单不存在", "error_code": "not_found"})
@@ -216,11 +239,9 @@ def advance_status(
     order_id: str,
     body: StatusAdvanceRequest,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_staff_user),
 ):
-    """推进状态(审核/发货/签收/归还/完成)。需 staff 权限。"""
-    if not is_staff(user):
-        raise HTTPException(403, detail={"error": "需员工权限", "error_code": "forbidden"})
+    """推进状态(审核/发货/签收/归还/完成)。🆕 v2.2 凭后台登录令牌。"""
     order = db.get(Order, order_id)
     if not order:
         raise HTTPException(404, detail={"error": "订单不存在", "error_code": "not_found"})
@@ -232,4 +253,69 @@ def advance_status(
         raise HTTPException(409, detail={"error": e.message, "error_code": e.code})
     except OrderError as e:
         raise HTTPException(400, detail={"error": e.message, "error_code": e.code})
+    return _order_out(order)
+
+
+def _fetch_order(db: Session, order_id: str) -> Order:
+    order = db.get(Order, order_id)
+    if not order:
+        raise HTTPException(404, detail={"error": "订单不存在", "error_code": "not_found"})
+    return order
+
+
+def _map_order_errors(fn):
+    try:
+        return fn()
+    except ConflictError as e:
+        raise HTTPException(409, detail={"error": e.message, "error_code": e.code})
+    except OrderError as e:
+        code = 422 if e.code in ("invalid_transition", "missing_logistics") else 400
+        raise HTTPException(code, detail={"error": e.message, "error_code": e.code})
+
+
+@router.post("/orders/{order_id}/review", response_model=OrderOut)
+def review_order(
+    order_id: str,
+    body: ReviewRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_staff_user),
+):
+    """🆕 v2.1 商家审核(approve 一步放行档期 / reject 留待审核)。🆕 v2.2 凭后台令牌。"""
+    order = _fetch_order(db, order_id)
+    order = _map_order_errors(lambda: order_service.review_order(
+        db, order, approve=body.approve, operator_id=user.id,
+        paid_amount=body.paid_amount, payment_note=body.payment_note,
+        review_note=body.review_note, version=body.version,
+    ))
+    return _order_out(order)
+
+
+@router.post("/orders/{order_id}/ship", response_model=OrderOut)
+def ship_order(
+    order_id: str,
+    body: ShipRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_staff_user),
+):
+    """🆕 v2.1 上传物流并发货。🆕 v2.2 凭后台令牌。"""
+    order = _fetch_order(db, order_id)
+    order = _map_order_errors(lambda: order_service.ship_order(
+        db, order, carrier=body.carrier, tracking_no=body.tracking_no,
+        operator_id=user.id, version=body.version,
+    ))
+    return _order_out(order)
+
+
+@router.post("/orders/{order_id}/accept", response_model=OrderOut)
+def accept_order(
+    order_id: str,
+    body: AcceptRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_staff_user),
+):
+    """🆕 v2.1 商家验收完结。🆕 v2.2 凭后台令牌。"""
+    order = _fetch_order(db, order_id)
+    order = _map_order_errors(lambda: order_service.accept_order(
+        db, order, operator_id=user.id, version=body.version,
+    ))
     return _order_out(order)

@@ -32,6 +32,7 @@ class OrderItemOut(BaseModel):
 class OrderOut(BaseModel):
     order_id: str
     status: str
+    display_status: str  # 🆕 v2.1 客户/商家可见中文标签
     subtotal: Decimal
     deposit: Decimal
     discount_amount: Decimal
@@ -40,6 +41,10 @@ class OrderOut(BaseModel):
     rental_start: date
     rental_end: date
     version: int
+    carrier: Optional[str] = None  # 🆕 v2.1 快递公司
+    tracking_no: Optional[str] = None  # 🆕 v2.1 物流单号
+    review_note: Optional[str] = None  # 🆕 v2.1 审核驳回原因
+    user_id: Optional[str] = None  # 商家端列表用
     items: List[OrderItemOut] = []
 
 
@@ -66,6 +71,27 @@ class PaymentConfirmRequest(BaseModel):
 
 class StatusAdvanceRequest(BaseModel):
     target: str
+    version: Optional[int] = None
+
+
+# 🆕 v2.1 商家审核
+class ReviewRequest(BaseModel):
+    approve: bool
+    paid_amount: Optional[Decimal] = None
+    payment_note: Optional[str] = None
+    review_note: Optional[str] = None
+    version: Optional[int] = None
+
+
+# 🆕 v2.1 上传物流并发货
+class ShipRequest(BaseModel):
+    carrier: str
+    tracking_no: str
+    version: Optional[int] = None
+
+
+# 🆕 v2.1 商家验收完结
+class AcceptRequest(BaseModel):
     version: Optional[int] = None
 
 

@@ -1,0 +1,24 @@
+# systemd 服务单元 (v2.2) —— 进程守护, 开机自启 + 崩溃重启
+# 安装:
+#   sudo cp deploy/rental.service /etc/systemd/system/rental.service
+#   (按实际路径改下面的 User / WorkingDirectory / EnvironmentFile / ExecStart)
+#   sudo systemctl daemon-reload && sudo systemctl enable --now rental
+#   sudo systemctl status rental    # 查看状态
+#   sudo journalctl -u rental -f    # 看日志
+
+[Unit]
+Description=Cat Camera Rental AI Assistant (FastAPI)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/rental
+EnvironmentFile=/etc/rental/.env
+# 🔴 单进程/单 worker: APScheduler 在进程内跑预留扫描与飞书轮询, 多 worker 会重复执行
+ExecStart=/opt/rental/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

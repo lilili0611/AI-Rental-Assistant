@@ -43,17 +43,40 @@ def _sync_to_feishu(db: Session, order: Order) -> None:
 
 # ============ 状态机 ============
 # 状态 -> 允许转入的状态集合 (Spec 3.1)
+# 🆕 v2.1: shipped 可直接 -> completed(商家验收), 跳过 active/returned;
+#          active/returned 仍保留以兼容旧数据。
 ALLOWED_TRANSITIONS = {
     "draft": {"pending_payment", "cancelled"},
     "pending_payment": {"paid", "cancelled"},
     "paid": {"confirmed", "cancelled"},
     "confirmed": {"shipped", "cancelled"},
-    "shipped": {"active"},
-    "active": {"returned"},
+    "shipped": {"completed", "active"},
+    "active": {"returned", "completed"},
     "returned": {"completed"},
     "completed": set(),
     "cancelled": set(),
 }
+
+# 🆕 v2.1: 内部状态 -> 客户/商家可见中文标签 (Spec 3.1.1, 单一事实来源)
+DISPLAY_STATUS = {
+    "draft": "草稿",
+    "pending_payment": "商家审核中",
+    "paid": "商家审核中",
+    "confirmed": "已确认档期（待发货）",
+    "shipped": "已发货",
+    "active": "使用中",
+    "returned": "待验收",
+    "completed": "订单已完结",
+    "cancelled": "已取消",
+}
+
+
+def display_status(order: Order) -> str:
+    """订单的客户/商家可见中文标签。审核驳回时附原因。"""
+    label = DISPLAY_STATUS.get(order.status, order.status)
+    if order.status == "pending_payment" and order.review_note:
+        return f"{label}（审核未通过：{order.review_note}）"
+    return label
 
 
 class OrderError(Exception):
@@ -298,6 +321,117 @@ def advance_status(
     _audit(
         db, order.id, "status", operator_id,
         old_value=old, new_value={"status": target},
+    )
+    db.commit()
+    db.refresh(order)
+    _sync_to_feishu(db, order)
+    return order
+
+
+# ============ v2.1 商家审核 / 物流 / 验收 ============
+def review_order(
+    db: Session,
+    order: Order,
+    approve: bool,
+    operator_id: Optional[str],
+    paid_amount: Optional[Decimal] = None,
+    payment_note: Optional[str] = None,
+    review_note: Optional[str] = None,
+    version: Optional[int] = None,
+) -> Order:
+    """🆕 商家审核(Spec 4.8)。
+
+    approve=True: 一步完成「确认收款 + 放行档期」(pending_payment->paid->confirmed),
+                  记录 paid_amount/payment_note, 清空 review_note。
+    approve=False: 状态留在 pending_payment, 写 review_note(驳回原因)。
+    """
+    _check_version(order, version)
+    if order.status != "pending_payment":
+        raise OrderError(
+            f"当前状态 {order.status} 不可审核(仅商家审核中可审)",
+            code="invalid_transition",
+        )
+    old = {"status": order.status, "paid_amount": str(order.paid_amount)}
+
+    if not approve:
+        order.review_note = review_note
+        order.version += 1
+        order.last_modified_by = operator_id
+        _audit(
+            db, order.id, "review", operator_id, old_value=old,
+            new_value={"status": order.status, "approved": False},
+            reason=review_note,
+        )
+        db.commit()
+        db.refresh(order)
+        _sync_to_feishu(db, order)
+        return order
+
+    # 审核通过: pending_payment -> paid -> confirmed
+    _transition(order, "paid")
+    if paid_amount is not None:
+        order.paid_amount = _money(paid_amount)
+    order.payment_note = payment_note
+    _transition(order, "confirmed")
+    order.review_note = None
+    order.version += 1
+    order.last_modified_by = operator_id
+    _audit(
+        db, order.id, "review", operator_id, old_value=old,
+        new_value={"status": "confirmed", "approved": True,
+                   "paid_amount": str(order.paid_amount)},
+        reason=payment_note,
+    )
+    db.commit()
+    db.refresh(order)
+    _sync_to_feishu(db, order)
+    return order
+
+
+def ship_order(
+    db: Session,
+    order: Order,
+    carrier: str,
+    tracking_no: str,
+    operator_id: Optional[str],
+    version: Optional[int] = None,
+) -> Order:
+    """🆕 上传物流并发货(Spec 4.8): confirmed -> shipped, 写 carrier/tracking_no。"""
+    _check_version(order, version)
+    if not (carrier and carrier.strip()) or not (tracking_no and tracking_no.strip()):
+        raise OrderError("快递公司与物流单号均不能为空", code="missing_logistics")
+    old = {"status": order.status}
+    _transition(order, "shipped")
+    order.carrier = carrier.strip()
+    order.tracking_no = tracking_no.strip()
+    order.version += 1
+    order.last_modified_by = operator_id
+    _audit(
+        db, order.id, "status", operator_id, old_value=old,
+        new_value={"status": "shipped", "carrier": order.carrier,
+                   "tracking_no": order.tracking_no},
+    )
+    db.commit()
+    db.refresh(order)
+    _sync_to_feishu(db, order)
+    return order
+
+
+def accept_order(
+    db: Session,
+    order: Order,
+    operator_id: Optional[str],
+    version: Optional[int] = None,
+) -> Order:
+    """🆕 商家验收完结(Spec 4.8): shipped -> completed(默认), 跳过 active/returned。"""
+    _check_version(order, version)
+    old = {"status": order.status}
+    _transition(order, "completed")
+    order.version += 1
+    order.last_modified_by = operator_id
+    _audit(
+        db, order.id, "status", operator_id, old_value=old,
+        new_value={"status": "completed"},
     )
     db.commit()
     db.refresh(order)

@@ -12,8 +12,12 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 
+from app.core import security
 from app.database import SessionLocal, engine
 from app.models import Base, Camera, CameraConfig, InventoryUnit, User
+
+# 演示员工后台默认口令(仅本地演示, 上线前必须重设)
+_DEMO_STAFF_PASSWORD = "admin888"
 
 
 def D(x):
@@ -82,7 +86,9 @@ def seed():
 
         customer = User(phone="13800000001", name="测试客户",
                         is_authenticated=True, role="customer")
-        staff = User(phone="13900000002", name="仓库小王", role="staff")
+        # 🆕 v2.2: 商家后台需密码登录, 演示员工设默认密码(上线前务必改)
+        staff = User(phone="13900000002", name="仓库小王", role="staff",
+                     password_hash=security.hash_password(_DEMO_STAFF_PASSWORD))
         db.add_all([customer, staff])
         db.commit()
 
@@ -91,7 +97,8 @@ def seed():
         n_unit = db.query(InventoryUnit).count()
         print(f"✅ 演示数据已写入: {n_cam} 个设备 / {n_cfg} 个配置 / {n_unit} 台实物")
         print(f"   客户 X-User-Id: {customer.id}  phone={customer.phone}")
-        print(f"   员工 X-User-Id: {staff.id}  phone={staff.phone}")
+        print(f"   员工后台登录: phone={staff.phone}  password={_DEMO_STAFF_PASSWORD}")
+        print("   ⚠️ 演示弱口令，上线前用 scripts/set_staff_password.py 重设！")
     finally:
         db.close()
 

@@ -61,6 +61,76 @@ def test_full_lifecycle(db, seeded):
     assert order.status == "completed"
 
 
+def test_review_approve_advances_to_confirmed(db, seeded):
+    """🆕 v2.1 §9.8: 审核通过一步推进到 confirmed 并记录收款。"""
+    order = _create_order(db, seeded)
+    order = order_service.review_order(
+        db, order, approve=True, operator_id=seeded["staff"].id,
+        paid_amount=Decimal("270"), payment_note="微信转账",
+    )
+    assert order.status == "confirmed"
+    assert order.paid_amount == Decimal("270.00")
+    assert order.payment_note == "微信转账"
+    assert order_service.display_status(order) == "已确认档期（待发货）"
+
+
+def test_review_reject_stays_pending(db, seeded):
+    """🆕 v2.1 §9.8: 驳回留在 pending_payment 并写 review_note。"""
+    order = _create_order(db, seeded)
+    order = order_service.review_order(
+        db, order, approve=False, operator_id=seeded["staff"].id,
+        review_note="未收到款",
+    )
+    assert order.status == "pending_payment"
+    assert order.review_note == "未收到款"
+    assert "审核未通过：未收到款" in order_service.display_status(order)
+
+
+def test_review_only_from_pending(db, seeded):
+    """🆕 v2.1: 非 pending_payment 不可审核。"""
+    order = _create_order(db, seeded)
+    order_service.review_order(db, order, approve=True, operator_id=seeded["staff"].id,
+                              paid_amount=Decimal("270"))
+    with pytest.raises(OrderError) as exc:
+        order_service.review_order(db, order, approve=True, operator_id=seeded["staff"].id)
+    assert exc.value.code == "invalid_transition"
+
+
+def test_ship_requires_logistics(db, seeded):
+    """🆕 v2.1 §9.9: 发货必须带快递公司+单号。"""
+    order = _create_order(db, seeded)
+    order = order_service.review_order(db, order, approve=True,
+                                       operator_id=seeded["staff"].id, paid_amount=Decimal("270"))
+    with pytest.raises(OrderError) as exc:
+        order_service.ship_order(db, order, carrier="", tracking_no="",
+                                 operator_id=seeded["staff"].id)
+    assert exc.value.code == "missing_logistics"
+
+
+def test_ship_then_accept_completes(db, seeded):
+    """🆕 v2.1 §9.9: 发货写物流 -> shipped, 验收直接 -> completed(跳过 active/returned)。"""
+    s = seeded["staff"].id
+    order = _create_order(db, seeded)
+    order = order_service.review_order(db, order, approve=True, operator_id=s,
+                                       paid_amount=Decimal("270"))
+    order = order_service.ship_order(db, order, carrier="顺丰速运",
+                                     tracking_no="SF123", operator_id=s)
+    assert order.status == "shipped"
+    assert order.carrier == "顺丰速运"
+    assert order.tracking_no == "SF123"
+    assert order_service.display_status(order) == "已发货"
+
+    order = order_service.accept_order(db, order, operator_id=s)
+    assert order.status == "completed"
+    assert order_service.display_status(order) == "订单已完结"
+
+
+def test_display_status_mapping(db, seeded):
+    """🆕 v2.1 §9.10: 内部状态映射到正确中文标签。"""
+    order = _create_order(db, seeded)
+    assert order_service.display_status(order) == "商家审核中"
+
+
 def test_optimistic_lock_conflict(db, seeded):
     """§9.5: version 不匹配应拦截。"""
     order = _create_order(db, seeded)

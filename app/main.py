@@ -75,4 +75,10 @@ def index():
     return FileResponse(os.path.join(_STATIC_DIR, "index.html"))
 
 
+# 商家后台 (静态页，页面内用员工手机号登录，接口侧校验 staff 权限)
+@app.get("/admin", include_in_schema=False)
+def admin():
+    return FileResponse(os.path.join(_STATIC_DIR, "admin.html"))
+
+
 app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")

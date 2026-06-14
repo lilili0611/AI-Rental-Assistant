@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>猫猫头相机租赁 · 商家后台</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&family=Nunito:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap');
+  :root{
+    --bg:#FFF8F0; --surface:#fff; --surface-2:#FFF3E8;
+    --ink:#2D2D2D; --ink-2:#6B6B6B; --ink-3:#A89F97;
+    --brand:#FF3366; --brand-rgb:255,51,102; --brand-700:#E0254F; --brand-50:#FFE6EC;
+    --ok:#00CC88; --ok-50:#E6FAF2; --warn:#FF9F1C; --warn-50:#FFF1DD; --danger:#FF3366; --danger-50:#FFE6EC;
+    --line:#FFE0CC; --line-2:#FFD0B0;
+    --sh-sm:0 3px 10px rgba(var(--brand-rgb),.10);
+    --bounce:cubic-bezier(.34,1.56,.64,1); --ease:cubic-bezier(.2,.7,.2,1);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{font-family:"Nunito","Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.6}
+  h1,h2{margin:0;font-family:"ZCOOL KuaiLe","Noto Sans SC",sans-serif;font-weight:400}
+  .tnum{font-variant-numeric:tabular-nums}
+  header{position:sticky;top:0;z-index:20;border-bottom:2px solid var(--line);background:linear-gradient(110deg,#FFF1E6,#FFF8F0 45%,#FFEDE3)}
+  .hbar{max-width:1200px;margin:0 auto;padding:13px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+  .logo h1{font-size:21px;color:var(--brand)}.logo .sub{font-size:12px;color:var(--ink-2)}
+  input,select,button{font-size:14px;font-family:inherit}
+  input,select{height:44px;padding:0 14px;border:2px solid var(--line-2);border-radius:14px;background:#fff;color:var(--ink);outline:none;font-weight:600}
+  input:focus,select:focus{border-color:var(--brand);box-shadow:0 0 0 4px var(--brand-50)}
+  button{cursor:pointer;border:none;border-radius:999px;height:44px;padding:0 20px;background:var(--brand);color:#fff;font-weight:700;transition:.18s var(--bounce);box-shadow:0 6px 16px rgba(var(--brand-rgb),.30)}
+  button:hover{background:var(--brand-700);transform:translateY(-2px)}
+  button.sm{height:36px;padding:0 14px;font-size:13px;box-shadow:none}
+  button.ghost{background:#fff;color:var(--brand);border:2px solid var(--brand);box-shadow:none}
+  button.ok{background:var(--ok);box-shadow:none}button.ok:hover{filter:brightness(.94)}
+  button.danger{background:#fff;color:var(--danger);border:2px solid var(--danger);box-shadow:none}
+  button:disabled{opacity:.4;cursor:not-allowed;transform:none}
+  .who{font-size:13px;color:var(--ink-2);display:flex;align-items:center;gap:6px}
+  .who .dot{width:9px;height:9px;border-radius:50%;background:var(--ink-3)}.who.on .dot{background:var(--ok)}
+  .wrap{max-width:1200px;margin:0 auto;padding:22px 20px}
+  .card{background:var(--surface);border:2px solid var(--line);border-radius:20px;padding:18px;box-shadow:var(--sh-sm);margin-bottom:18px}
+  .bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th,td{text-align:left;padding:11px 10px;border-bottom:1px solid var(--line)}
+  th{color:var(--ink-2);font-weight:700;font-size:12.5px;white-space:nowrap}
+  td.acts{display:flex;gap:6px;flex-wrap:wrap}
+  .oid{font-weight:700}
+  .chip{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700}
+  .chip .d{width:6px;height:6px;border-radius:50%;background:currentColor}
+  .chip.ok{background:var(--ok-50);color:#0a7a52}.chip.no{background:var(--danger-50);color:var(--brand-700)}.chip.warn{background:var(--warn-50);color:#a85f08}
+  .muted{color:var(--ink-3)}
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:11px 20px;border-radius:999px;font-weight:600;font-size:14px;opacity:0;transition:.25s var(--ease);pointer-events:none;z-index:50}
+  .toast.show{opacity:1}
+  @media(max-width:760px){table{display:block;overflow-x:auto;white-space:nowrap}}
+</style>
+</head>
+<body>
+<header><div class="hbar">
+  <div class="logo"><h1>🐱 猫猫头商家后台</h1><div class="sub">订单审核 · 物流 · 验收</div></div>
+  <div class="bar" style="margin:0">
+    <span class="who" id="who"><span class="dot"></span><span id="whoTxt">未登录</span></span>
+    <input id="phone" placeholder="员工手机号" style="width:140px" value="13900000002" />
+    <input id="password" type="password" placeholder="密码" style="width:120px" onkeydown="if(event.key==='Enter')login()" />
+    <button class="ghost sm" onclick="login()">登录</button>
+    <button class="ghost sm" onclick="logout()">退出</button>
+  </div>
+</div></header>
+
+<div class="wrap">
+  <div class="card">
+    <div class="bar">
+      <h2 style="font-size:18px">全部订单</h2>
+      <span class="muted" id="count"></span>
+      <div style="flex:1"></div>
+      <select id="filter" onchange="load()">
+        <option value="">全部状态</option>
+        <option value="pending_payment">商家审核中</option>
+        <option value="confirmed">已确认档期（待发货）</option>
+        <option value="shipped">已发货</option>
+        <option value="completed">订单已完结</option>
+        <option value="cancelled">已取消</option>
+      </select>
+      <button class="ghost sm" onclick="load()">刷新</button>
+    </div>
+    <table>
+      <thead><tr>
+        <th>订单号</th><th>客户</th><th>租期</th><th>应付/已收</th><th>状态</th><th>物流</th><th>操作</th>
+      </tr></thead>
+      <tbody id="rows"><tr><td colspan="7" class="muted">请用员工账号密码登录</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $=id=>document.getElementById(id);
+let USER=null, TOKEN=localStorage.getItem('rental_admin_token')||null;
+const fmt=n=>Number(n||0).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});
+function toast(m){const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200);}
+function errOf(d){return (d&&d.detail&&(d.detail.error||d.detail.details))||(d&&d.error)||'请求失败';}
+// 🆕 v2.2: 后台凭登录令牌(Bearer), 不再用可伪造的 X-User-Id
+function hdrs(json){const h=json?{'Content-Type':'application/json'}:{};if(TOKEN)h['Authorization']='Bearer '+TOKEN;return h;}
+
+async function login(){
+  const phone=$('phone').value.trim();const password=$('password').value;
+  if(!phone||!password)return toast('请输入手机号和密码');
+  try{
+    const r=await fetch('/api/auth/staff-login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone,password})});
+    const d=await r.json();
+    if(!r.ok){toast('登录失败：'+errOf(d));return;}
+    TOKEN=d.token;localStorage.setItem('rental_admin_token',TOKEN);
+    USER=d;$('who').classList.add('on');$('whoTxt').textContent=(d.name||phone)+'（'+(d.role||'')+'）';
+    $('password').value='';
+    load();
+  }catch(e){toast('登录异常');}
+}
+
+function logout(){TOKEN=null;USER=null;localStorage.removeItem('rental_admin_token');$('who').classList.remove('on');$('whoTxt').textContent='未登录';$('rows').innerHTML='<tr><td colspan="7" class="muted">请用员工账号密码登录</td></tr>';}
+
+function stChip(o){const s=o.status;const cls=s==='cancelled'?'no':(s==='completed'?'ok':'warn');return `<span class="chip ${cls}"><span class="d"></span>${o.display_status||s}</span>`;}
+
+function actBtns(o){
+  const v=o.version;
+  if(o.status==='pending_payment')
+    return `<button class="ok sm" onclick="review('${o.order_id}',${v},true)">审核通过</button>
+            <button class="danger sm" onclick="review('${o.order_id}',${v},false)">驳回</button>`;
+  if(o.status==='confirmed')
+    return `<button class="sm" onclick="ship('${o.order_id}',${v})">上传物流并发货</button>`;
+  if(o.status==='shipped')
+    return `<button class="ok sm" onclick="accept('${o.order_id}',${v})">商家验收完结</button>`;
+  return '<span class="muted">—</span>';
+}
+
+async function load(){
+  if(!TOKEN){$('rows').innerHTML='<tr><td colspan="7" class="muted">请用员工账号密码登录</td></tr>';return;}
+  const f=$('filter').value;
+  const r=await fetch('/api/orders/admin'+(f?('?status='+f):''),{headers:hdrs()});
+  if(r.status===401){logout();toast('登录已失效，请重新登录');return;}
+  const d=await r.json();
+  if(!r.ok){$('rows').innerHTML=`<tr><td colspan="7" class="muted">${errOf(d)}</td></tr>`;return;}
+  const list=d.data||[];$('count').textContent=list.length+' 单';
+  if(!list.length){$('rows').innerHTML='<tr><td colspan="7" class="muted">暂无订单</td></tr>';return;}
+  $('rows').innerHTML=list.map(o=>`<tr>
+    <td class="oid tnum">${o.order_id}</td>
+    <td class="muted tnum">${(o.user_id||'').slice(0,8)}</td>
+    <td class="tnum">${o.rental_start} ~ ${o.rental_end}</td>
+    <td class="tnum">¥${fmt(o.total_price)} / ¥${fmt(o.paid_amount)}</td>
+    <td>${stChip(o)}</td>
+    <td class="tnum">${o.tracking_no?((o.carrier||'')+' '+o.tracking_no):'<span class="muted">—</span>'}</td>
+    <td class="acts">${actBtns(o)}</td>
+  </tr>`).join('');
+}
+
+async function post(id,path,body){
+  const r=await fetch(`/api/orders/${id}/${path}`,{method:'POST',headers:hdrs(true),body:JSON.stringify(body)});
+  if(r.status===401){logout();toast('登录已失效，请重新登录');return false;}
+  const d=await r.json();if(!r.ok){toast(errOf(d));return false;}return true;
+}
+
+async function review(id,ver,approve){
+  if(approve){
+    const amt=prompt('确认已收到付款。请输入已收金额：');
+    if(amt===null)return;
+    const note=prompt('收款备注（如：微信转账，可留空）','')||'';
+    if(await post(id,'review',{approve:true,paid_amount:Number(amt)||0,payment_note:note,version:ver})){toast('已审核通过，档期已确认');load();}
+  }else{
+    const reason=prompt('驳回原因（如：未收到款）：');
+    if(reason===null)return;
+    if(await post(id,'review',{approve:false,review_note:reason,version:ver})){toast('已驳回');load();}
+  }
+}
+
+async function ship(id,ver){
+  const carrier=prompt('快递公司（如：顺丰速运）：');if(carrier===null)return;
+  const no=prompt('物流单号：');if(no===null)return;
+  if(!carrier.trim()||!no.trim())return toast('快递公司与单号都要填');
+  if(await post(id,'ship',{carrier:carrier.trim(),tracking_no:no.trim(),version:ver})){toast('已发货');load();}
+}
+
+async function accept(id,ver){
+  if(!confirm('确认商家验收并完结该订单？'))return;
+  if(await post(id,'accept',{version:ver})){toast('订单已完结');load();}
+}
+
+// 若本地已存有登录令牌(上次登录), 直接尝试加载; 失效会自动退出要求重登
+if(TOKEN){$('who').classList.add('on');$('whoTxt').textContent='已登录';load();}
+</script>
+</body>
+</html>
