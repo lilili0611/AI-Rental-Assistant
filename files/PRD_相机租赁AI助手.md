@@ -3,8 +3,8 @@
 | 项目 | 内容 |
 |------|------|
 | 文档类型 | PRD (Product Requirements Document) |
-| 版本 | v2.2 |
-| 状态 | Phase 1+2 已落地；v2.1 订单审核/物流/商家页已实现；v2.2 新增「商家后台密码鉴权 + 生产上线」(设计中) |
+| 版本 | v2.3 |
+| 状态 | Phase 1+2 + v2.1/v2.2 已实现；v2.3 数据库迁移到 Supabase(Postgres)(设计中) |
 | 读者 | 产品 / 技术 / 决策层 |
 | 范围 | 完整产品蓝图 (Phase 1–4)；Phase 1+2 已实现 |
 | 产品名 | 猫猫头相机租赁 (品牌升级；吉祥物=白色长毛英短戴焦糖帽抱相机) |
@@ -101,6 +101,32 @@
 **3. 角色与边界不变**：customer / staff / admin 三级；后台鉴权只收紧 staff/admin 入口。
 
 > 部署细节（运行命令、Nginx/systemd 配置、环境变量清单、备案与域名步骤）见 Spec v2.2「第 11 章 生产部署」与仓库 `deploy/` 目录。
+
+---
+
+## 0.3 v2.3 变更记录 — 数据库迁移到 Supabase (本次迭代)
+
+> 对应 Spec v2.3 同名章节。**铁律：本节先于代码定稿。**
+
+**背景**：此前数据存在本地 SQLite 文件（`rental.db`），无法多端共享、云部署易丢失。改用 **Supabase（托管 PostgreSQL）** 作为正式数据库，数据集中、可云端访问、可备份。
+
+**1. 数据库后端：本地 SQLite → Supabase Postgres。**
+- 由于代码自始按「可迁移到 PostgreSQL」设计（SQLAlchemy ORM + `DATABASE_URL` 驱动、库存/计价等无 SQLite 专有逻辑），迁移**以连接配置 + 驱动为主，不重写业务代码**。
+- 生产/云端 `DATABASE_URL` 指向 Supabase 连接串；**不再以本地 `rental.db` 为准**。
+- 表结构由现有 ORM 模型在 Supabase 自动建立（与 Spec §2 数据模型一致，JSON 字段落 Postgres JSON/JSONB）。
+
+**2. 本地→Supabase 数据迁移。**
+- 提供迁移脚本，把本地 SQLite 现有数据（设备目录/配置/库存/用户/订单等）整体搬到 Supabase，作为初始测试数据。
+- 亦可用 `scripts/seed_data.py` 直接对 Supabase 灌入干净的演示目录（二选一）。
+
+**3. 测试与本地开发保持可用。**
+- 单元测试仍用内存 SQLite（快、隔离），不连真实 Supabase；数据库可移植性正是靠 ORM 保证。
+- 本地开发可继续用 SQLite 或连 Supabase，由 `DATABASE_URL` 切换。
+
+**4. 凭证安全。**
+- Supabase 连接串含密码，**只进环境变量 / `.env`，绝不入库**。建议用 Supabase 的连接池（Pooler）连接串以兼容 IPv4 与云平台。
+
+> 技术细节（驱动、连接串格式、迁移脚本、连接池）见 Spec v2.3「§1.3 + 第 12 章」。
 
 ---
 

@@ -8,18 +8,21 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import settings
 
+_is_sqlite = settings.database_url.startswith("sqlite")
+
 # SQLite 需要 check_same_thread=False 以支持多线程(FastAPI + 定时任务)
-_connect_args = (
-    {"check_same_thread": False}
-    if settings.database_url.startswith("sqlite")
-    else {}
-)
+_connect_args = {"check_same_thread": False} if _is_sqlite else {}
+
+# Postgres/Supabase: 池里空闲连接会被服务端回收, 用 pool_recycle 主动回收避免报错;
+# pool_pre_ping 兜底失效连接。SQLite 无连接池概念, 不需要这些。
+_engine_kwargs = {} if _is_sqlite else {"pool_recycle": 1800}
 
 engine = create_engine(
     settings.database_url,
     connect_args=_connect_args,
     pool_pre_ping=True,
     echo=False,
+    **_engine_kwargs,
 )
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
