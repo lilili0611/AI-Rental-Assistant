@@ -1,0 +1,30 @@
+# Render 蓝图 (Blueprint) —— 在 Render 选 "New + → Blueprint" 指向本仓库即可。
+# 注意: 持久盘(disk)需付费套餐(starter 起)；free 套餐无持久盘, SQLite 会在重部署/休眠后丢数据。
+services:
+  - type: web
+    name: cat-camera-rental
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      # 🔴 关系到密码哈希与登录令牌签名, 自动生成强随机值
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      # SQLite 落在持久盘挂载目录
+      - key: DATABASE_URL
+        value: sqlite:////var/data/rental.db
+      # 首次部署自动灌入演示设备目录(库非空则跳过)
+      - key: AUTO_SEED
+        value: "true"
+      # 飞书默认关闭(需要时在面板补 FEISHU_* 并设为 true)
+      - key: FEISHU_ENABLED
+        value: "false"
+    disk:
+      name: rental-data
+      mountPath: /var/data
+      sizeGB: 1

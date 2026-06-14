@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     # 加密
     encryption_key: str = "change-me-in-production-please-32b"
 
+    # 部署: 启动时若数据库为空则自动灌入演示目录(云端首次部署用; 数据库非空则不动)
+    auto_seed: bool = False
+
     # 业务参数
     reservation_ttl_minutes: int = 30  # 库存预留时长
     free_cancel_hours: int = 48  # 未支付免费取消窗口

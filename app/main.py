@@ -26,10 +26,30 @@ _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 logging.basicConfig(level=logging.INFO)
 
 
+def _auto_seed_if_empty() -> None:
+    """云端首次部署: 数据库为空时灌入演示目录。非空则不动(不会覆盖已有数据)。"""
+    from app.database import SessionLocal
+    from app.models.camera import Camera
+
+    db = SessionLocal()
+    try:
+        if db.query(Camera).count() == 0:
+            logging.info("AUTO_SEED: 数据库为空, 灌入演示目录…")
+            from scripts.seed_data import seed
+
+            seed()
+        else:
+            logging.info("AUTO_SEED: 数据库已有数据, 跳过。")
+    finally:
+        db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 启动: 建表 + 启动定时任务
+    # 启动: 建表 +(可选)自动灌种子 + 启动定时任务
     Base.metadata.create_all(bind=engine)
+    if settings.auto_seed:
+        _auto_seed_if_empty()
     start_scheduler()
     yield
     # 关闭
