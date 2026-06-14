@@ -23,7 +23,7 @@ import os
 
 from sqlalchemy import create_engine
 
-from app.config import settings
+from app.database import DATABASE_URL  # 已规范化(自动补 +psycopg)
 from app.models import Base  # noqa: F401  导入即注册所有表到 metadata
 
 
@@ -38,7 +38,7 @@ def main() -> int:
         return 1
 
     source_url = f"sqlite:///{args.source}"
-    target_url = settings.database_url
+    target_url = DATABASE_URL
     if target_url.startswith("sqlite") and args.source in target_url:
         print("❌ 目标库就是源 SQLite, 请把 DATABASE_URL 设为目标(如 Supabase)连接串。")
         return 1
