@@ -8,6 +8,8 @@
   ],
   "experimentalServices": {
     "cat-camera-rental": {
+      "entrypoint": "app/index.py",
+      "framework": "fastapi",
       "type": "web",
       "routePrefix": "/",
       "buildCommand": "pip install -r requirements.txt"
