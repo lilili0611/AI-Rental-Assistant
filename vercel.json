@@ -5,5 +5,12 @@
       "path": "/api/cron/sweep",
       "schedule": "0 * * * *"
     }
-  ]
+  ],
+  "experimentalServices": {
+    "cat-camera-rental": {
+      "type": "web",
+      "routePrefix": "/",
+      "buildCommand": "pip install -r requirements.txt"
+    }
+  }
 }
