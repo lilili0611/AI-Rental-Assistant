@@ -4,6 +4,10 @@
 
 > 配套文档：[PRD](files/PRD_相机租赁AI助手.md) · [Spec](files/Spec_相机租赁AI助手.md)
 
+正式域名规划：
+- 客户前端：`https://bozipaopao.cn/`
+- 商家后台：`https://admin.bozipaopao.cn/`
+
 ## 技术栈
 
 | 层 | 选型 |

@@ -37,6 +37,12 @@ def _sync_to_feishu(db: Session, order: Order) -> None:
         return
     from app.integrations import feishu
 
+    if not feishu.should_sync_order(order):
+        if order.sync_status == "sync_pending":
+            order.sync_status = "none"
+            db.commit()
+        return
+
     ok = feishu.push_order(order)
     order.sync_status = "synced" if ok else "sync_pending"
     db.commit()

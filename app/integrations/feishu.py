@@ -4,7 +4,8 @@
   FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_BITABLE_APP_TOKEN / FEISHU_ORDER_TABLE_ID
 
 同步方向:
-  AI -> 飞书: 订单创建/状态变更时写入飞书多维表格(失败重试3次, 仍失败标 sync_pending)。
+  AI -> 飞书: 仅商家审核通过后写入飞书多维表格
+             (失败重试3次, 仍失败标 sync_pending)。
   飞书 -> AI: 每30秒轮询最近变更 + Webhook 推送。
 冲突解决: 比较 last_modified_at 时间戳, 后改胜出; 乐观锁 version 防并发覆盖。
 
@@ -51,6 +52,17 @@ _STATUS_ALIASES = {
     "已完成": "completed", "订单已完结": "completed",  # 🆕 v2.1
     "已取消": "cancelled",
 }
+
+_SYNCABLE_STATUSES = {"confirmed", "shipped", "active", "returned", "completed"}
+
+
+def should_sync_order(order) -> bool:
+    """只有商家审核通过的订单才允许同步到飞书。"""
+    return (
+        order.status in _SYNCABLE_STATUSES
+        # 已同步过的审核通过订单若后续取消, 仍允许把取消状态回写到飞书。
+        or (order.status == "cancelled" and order.sync_status == "synced")
+    )
 
 
 def _text(v) -> Optional[str]:
@@ -185,6 +197,9 @@ def push_order(order) -> bool:
     """
     if not _enabled():
         return False
+    if not should_sync_order(order):
+        logger.info("订单未满足飞书同步条件，跳过: order=%s status=%s", order.id, order.status)
+        return False
     fields = _build_fields(order)
     for attempt in range(3):
         try:
@@ -246,11 +261,16 @@ def _push_pending_orders(db) -> int:
         select(Order).where(Order.sync_status == "sync_pending")
     ).scalars().all()
     pushed = 0
+    cleaned = 0
     for order in pending:
+        if not should_sync_order(order):
+            order.sync_status = "none"
+            cleaned += 1
+            continue
         if push_order(order):
             order.sync_status = "synced"
             pushed += 1
-    if pushed:
+    if pushed or cleaned:
         db.commit()
     return pushed
 
@@ -287,6 +307,12 @@ def poll_changes_job():
                 continue
             order = db.get(Order, oid)
             if not order:  # 飞书里的设备行等非本系统订单, 跳过
+                continue
+
+            if not should_sync_order(order):
+                if order.sync_status == "sync_pending":
+                    order.sync_status = "none"
+                    db.commit()
                 continue
 
             # 本地有未推送改动 -> 本地优先, 重推飞书

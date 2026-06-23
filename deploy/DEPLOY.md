@@ -45,10 +45,15 @@
 
 3. 保存后 Railway 自动构建并启动。首次启动会：连 Supabase → `create_all` 建表 → 因 `AUTO_SEED=true` 灌入演示目录。
 4. 在 Settings → Networking **生成域名**（Generate Domain）拿到 `https://xxx.up.railway.app`。
+5. 绑定正式域名时，在 Railway 的 Networking 里把 `bozipaopao.cn` 和 `admin.bozipaopao.cn` 都添加到同一个服务；DNS 按 Railway 给出的目标值配置。代码会按访问域名自动区分：
+   - `https://bozipaopao.cn/`：客户前端
+   - `https://admin.bozipaopao.cn/`：商家后台
 
 ### A3. 验证
 
 - `https://xxx.up.railway.app/` 能看到设备列表 = Supabase 通了。
+- `https://bozipaopao.cn/` 打开客户前端。
+- `https://admin.bozipaopao.cn/` 打开商家后台。
 - Supabase 控制台 **Table Editor** 能看到 `cameras` / `orders` 等表与数据。
 - `/admin` 用演示员工 `13900000002` / `admin888` 登录。
 - Railway 部署日志出现「AUTO_SEED: 数据库为空, 灌入演示目录…」。
@@ -98,7 +103,10 @@
 ## 2. 域名 + 备案（你做，2–3 周）
 
 1. 在同一家云厂商买域名，提交 **ICP 备案**（用这台服务器），等管局通过。
-2. 备案通过后，把域名 A 记录解析到服务器公网 IP。
+2. 备案通过后，把域名解析到服务器公网 IP：
+   - `@` / `bozipaopao.cn` → A 记录 → 服务器公网 IP
+   - `www` / `www.bozipaopao.cn` → A 记录 → 服务器公网 IP
+   - `admin` / `admin.bozipaopao.cn` → A 记录 → 服务器公网 IP
 
 ## 3. 装环境（服务器上）
 
@@ -149,19 +157,19 @@ curl -s http://127.0.0.1:8000/health             # 期望 {"status":"ok",...}
 
 ```bash
 sudo cp deploy/nginx.conf.example /etc/nginx/conf.d/rental.conf
-sudo nano /etc/nginx/conf.d/rental.conf          # 改 your-domain.com
+sudo nano /etc/nginx/conf.d/rental.conf          # 核对 bozipaopao.cn / admin.bozipaopao.cn 和证书路径
 sudo nginx -t && sudo systemctl reload nginx
 # 证书（acme.sh 示例）：
 curl https://get.acme.sh | sh
-~/.acme.sh/acme.sh --issue -d your-domain.com --nginx
-# 签发后按 nginx.conf.example 里的 443 段启用 HTTPS，并把 80 跳转 443
+~/.acme.sh/acme.sh --issue -d bozipaopao.cn -d www.bozipaopao.cn -d admin.bozipaopao.cn --nginx
+# 签发后把证书安装到 nginx.conf.example 中配置的路径，并 reload nginx
 ```
 
 ## 8. 验证上线
 
-- `https://your-domain.com/`        租客前端
-- `https://your-domain.com/admin`   商家后台（账号 + 密码登录）
-- `https://your-domain.com/health`  健康检查
+- `https://bozipaopao.cn/`             租客前端
+- `https://admin.bozipaopao.cn/`       商家后台（账号 + 密码登录）
+- `https://bozipaopao.cn/health`       健康检查
 
 ---
 

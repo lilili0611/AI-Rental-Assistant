@@ -9,21 +9,28 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import __version__
-from app.api import auth, cameras, chat, inventory, orders, pricing, reservations
+from app.api import auth, cameras, chat, cron, inventory, orders, pricing, reservations
 from app.config import settings
 from app.database import engine, ensure_runtime_schema
 from app.models import Base  # noqa: F401  导入即注册全部模型到 metadata
 from app.scheduler import shutdown_scheduler, start_scheduler
 
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+_CUSTOMER_DOMAIN = "bozipaopao.cn"
+_WWW_DOMAIN = "www.bozipaopao.cn"
+_ADMIN_DOMAIN = "admin.bozipaopao.cn"
 
 logging.basicConfig(level=logging.INFO)
+
+
+def _host_name(request: Request) -> str:
+    return request.headers.get("host", "").split(":", 1)[0].lower()
 
 
 def _auto_seed_if_empty() -> None:
@@ -51,7 +58,10 @@ async def lifespan(app: FastAPI):
     ensure_runtime_schema()
     if settings.auto_seed:
         _auto_seed_if_empty()
-    start_scheduler()
+    if os.getenv("VERCEL"):
+        logging.info("VERCEL 环境使用 HTTP Cron 触发定时任务，跳过进程内调度器。")
+    else:
+        start_scheduler()
     yield
     # 关闭
     shutdown_scheduler()
@@ -78,6 +88,7 @@ app.include_router(pricing.router)
 app.include_router(chat.router)
 app.include_router(reservations.router)
 app.include_router(orders.router)
+app.include_router(cron.router)
 
 
 @app.get("/health", tags=["system"])
@@ -92,13 +103,17 @@ def health():
 
 # 租客下单前端 (静态页)
 @app.get("/", include_in_schema=False)
-def index():
+def index(request: Request):
+    if _host_name(request) == _ADMIN_DOMAIN:
+        return FileResponse(os.path.join(_STATIC_DIR, "admin.html"))
     return FileResponse(os.path.join(_STATIC_DIR, "index.html"))
 
 
 # 商家后台 (静态页，页面内用员工手机号登录，接口侧校验 staff 权限)
 @app.get("/admin", include_in_schema=False)
-def admin():
+def admin(request: Request):
+    if _host_name(request) in {_CUSTOMER_DOMAIN, _WWW_DOMAIN}:
+        return RedirectResponse(f"https://{_ADMIN_DOMAIN}/")
     return FileResponse(os.path.join(_STATIC_DIR, "admin.html"))
 
 
