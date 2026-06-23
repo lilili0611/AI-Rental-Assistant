@@ -12,7 +12,7 @@
 | ORM | SQLAlchemy 2.0 |
 | 数据库 | SQLite（起步，架构可平滑迁移 PostgreSQL）|
 | 数据验证 | Pydantic 2 |
-| 定时任务 | APScheduler（替代 Celery，扫描预留过期）|
+| 定时任务 | APScheduler（替代 Celery，扫描预留过期与订单超时）|
 | LLM | DeepSeek（OpenAI 兼容；未配置 Key 时自动降级到关键词规则）|
 | 飞书 | httpx 直连（Phase 2，默认关闭）|
 
@@ -37,9 +37,9 @@ pip install -r requirements.txt
 cp .env.example .env
 #   填入 DEEPSEEK_API_KEY 即启用真实大模型意图识别；留空则用关键词规则
 
-# 3. 初始化演示数据（建表 + 3台设备 + 用户）
+# 3. 初始化演示数据（建表 + 真实设备目录 + 演示账号）
 python -m scripts.seed_data
-#   会打印演示用的 user_id（请求头 X-User-Id）和配置 ID
+#   会打印租客邮箱账号和商家后台账号
 
 # 4. 启动服务
 uvicorn app.main:app --reload
@@ -55,7 +55,7 @@ source .venv/bin/activate
 pytest -q
 ```
 
-覆盖 Spec §9 关键路径：按日期库存、折扣叠加与边界、预留过期释放、订单状态机、乐观锁冲突、人工收款、预留转单不重复占用、取消释放库存。
+覆盖 Spec §9 关键路径：按日期库存、折扣叠加与边界、预留过期释放、订单状态机、乐观锁冲突、人工收款、预留转单不重复占用、取消释放库存、超时订单自动取消。
 
 ## 主要 API
 
@@ -74,7 +74,7 @@ pytest -q
 | POST | `/api/orders/{id}/confirm-payment` | **人工确认收款** | staff |
 | POST | `/api/orders/{id}/advance` | 推进状态（审核/发货/签收/归还/完成）| staff |
 
-认证（MVP）：在请求头携带 `X-User-Id: <用户ID>`（真实短信验证码登录后续接入）。
+认证：租客使用邮箱 + 密码注册/登录，服务端写入 HttpOnly 登录 Cookie；后续浏览器请求会自动携带登录态。商家后台仍使用员工手机号 + 密码登录。
 
 ## 目录结构
 
@@ -83,7 +83,7 @@ app/
   config.py            # 配置（环境变量）
   database.py          # 数据库引擎/会话
   main.py              # FastAPI 入口
-  scheduler.py         # 定时任务（预留过期扫描）
+  scheduler.py         # 定时任务（预留过期 / 订单超时扫描）
   models/              # ORM 模型
   schemas/             # Pydantic 请求/响应
   services/            # 业务逻辑

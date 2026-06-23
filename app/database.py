@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Generator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import settings
@@ -52,3 +52,36 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
+
+
+def ensure_runtime_schema() -> None:
+    """补齐轻量上线迁移，覆盖 create_all 不会修改既有表的场景。"""
+    inspector = inspect(engine)
+    tables = inspector.get_table_names()
+    if "users" not in tables:
+        return
+
+    user_columns = {col["name"] for col in inspector.get_columns("users")}
+    with engine.begin() as conn:
+        if "email" not in user_columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN email VARCHAR(255)"))
+
+        if engine.dialect.name == "postgresql":
+            conn.execute(
+                text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users (email)")
+            )
+        else:
+            conn.execute(
+                text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users (email)")
+            )
+
+        # v2.6 起押金只展示不计入应付。历史订单若仍是「租金+押金」口径,
+        # 且能明确识别为旧值, 自动迁到「应付=租金」。
+        if "orders" in tables:
+            conn.execute(
+                text(
+                    "UPDATE orders "
+                    "SET total_price = subtotal "
+                    "WHERE total_price = subtotal + deposit_amount"
+                )
+            )

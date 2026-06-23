@@ -28,7 +28,8 @@ function rec(name, ok, detail) {
     rec('设备列表加载', camCount >= 10, `${camCount} 台`);
 
     // 3. 登录
-    await page.fill('#phone', '13800000001');
+    await page.fill('#email', 'demo@example.com');
+    await page.fill('#password', 'demo1234');
     await page.click('.login button');
     await page.waitForFunction(() => document.getElementById('who').innerText.includes('·'), { timeout: 5000 });
     const who = await page.locator('#who').innerText();

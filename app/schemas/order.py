@@ -14,7 +14,7 @@ class OrderItemIn(BaseModel):
 
 
 class OrderCreateRequest(BaseModel):
-    items: List[OrderItemIn]
+    items: List[OrderItemIn] = Field(min_length=1)
     rental_start: date
     rental_end: date
     delivery_address_id: Optional[str] = None
@@ -64,7 +64,7 @@ class OrderExtendRequest(BaseModel):
 
 
 class PaymentConfirmRequest(BaseModel):
-    paid_amount: Decimal
+    paid_amount: Decimal = Field(ge=0)
     payment_note: Optional[str] = None
     version: Optional[int] = None
 
@@ -77,9 +77,16 @@ class StatusAdvanceRequest(BaseModel):
 # 🆕 v2.1 商家审核
 class ReviewRequest(BaseModel):
     approve: bool
-    paid_amount: Optional[Decimal] = None
+    paid_amount: Optional[Decimal] = Field(default=None, ge=0)
+    rent_amount: Optional[Decimal] = Field(default=None, ge=0)
     payment_note: Optional[str] = None
     review_note: Optional[str] = None
+    version: Optional[int] = None
+
+
+class RentUpdateRequest(BaseModel):
+    rent_amount: Decimal = Field(ge=0)
+    reason: Optional[str] = None
     version: Optional[int] = None
 
 

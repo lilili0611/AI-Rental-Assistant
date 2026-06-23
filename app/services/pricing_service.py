@@ -5,7 +5,7 @@
   3 天    -> three_day_price (三天租金)
   >3 天   -> three_day_price + (天数 - 3) × extra_day_price (三天以上续租/天)
 天数 = 含起含止，9/1–9/3 = 3 天。
-总应付 = 租金 + 押金。
+应付 = 租金；押金仅展示，不通过平台收取。
 """
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ class PriceBreakdown:
     basis: str               # 计价档位说明
     rent: Decimal            # 租金合计(单件)
     deposit: Decimal
-    total_due: Decimal       # 租金 + 押金(单件)
+    total_due: Decimal       # 应付租金(单件)，不含押金
 
     # —— 兼容旧调用方的别名 ——
     @property
@@ -88,5 +88,5 @@ def calculate_price(
         basis=basis,
         rent=rent,
         deposit=deposit,
-        total_due=_money(rent + deposit),
+        total_due=rent,
     )

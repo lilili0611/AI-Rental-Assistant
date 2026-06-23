@@ -123,11 +123,11 @@
     .reveal,.cam{opacity:1!important;transform:none!important}
     button:hover,.cam:hover{transform:none}
   }
-  @media(max-width:600px){
-    .hbar{padding:11px 14px}.wrap{padding:16px 14px}
-    .login input{width:104px}.grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
-    .quote .total .big{font-size:24px}.logo h1{font-size:19px}
-  }
+	  @media(max-width:600px){
+	    .hbar{padding:11px 14px}.wrap{padding:16px 14px}
+	    .login input{width:132px}.grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+	    .quote .total .big{font-size:24px}.logo h1{font-size:19px}
+	  }
 </style>
 </head>
 <body>
@@ -180,11 +180,13 @@
       <div class="mark"><img src="/static/mascot.png" alt="猫猫头" style="width:52px;height:52px;object-fit:contain"></div>
       <div><h1>猫猫头相机租赁</h1><div class="sub">白猫陪你拍，租得超开心 🐾</div></div>
     </div>
-    <div class="login">
-      <span class="who" id="who"><span class="dot"></span>未登录</span>
-      <input id="phone" placeholder="手机号" value="13800000001" style="width:124px" aria-label="手机号" />
-      <button onclick="login()">登录</button>
-    </div>
+	    <div class="login">
+	      <span class="who" id="who"><span class="dot"></span>未登录</span>
+	      <input id="email" type="email" placeholder="邮箱" value="demo@example.com" style="width:190px" aria-label="邮箱" />
+	      <input id="password" type="password" placeholder="密码" value="demo1234" style="width:120px" aria-label="密码" onkeydown="if(event.key==='Enter')login()" />
+	      <button onclick="login()">登录</button>
+	      <button class="ghost" onclick="register()">注册</button>
+	    </div>
   </div>
 </header>
 
@@ -231,9 +233,10 @@
 
 <script>
 const $=id=>document.getElementById(id);
-let USER=null,SESSION=null,CAMS=[],SELCAM=null,CONFIGS=[];
+let USER=JSON.parse(localStorage.getItem('rental_user')||'null'),SESSION=null,CAMS=[],SELCAM=null,CONFIGS=[];
+function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function toast(m){const t=$('toast');t.textContent=m;t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2200);}
-function hdrs(json){const h=json?{'Content-Type':'application/json'}:{};if(USER)h['X-User-Id']=USER.user_id;return h;}
+function hdrs(json){return json?{'Content-Type':'application/json'}:{};}
 function fmt(n){return Number(n).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function errOf(d){return (d&&d.detail&&(d.detail.error||d.detail.details))||(d&&d.detail)||'操作失败';}
 function icon(id){return `<svg class="ic"><use href="#${id}"/></svg>`;}
@@ -242,25 +245,46 @@ function observeReveal(){document.querySelectorAll('.reveal:not(.in)').forEach(e
 (function initDates(){const d=new Date(),a=new Date(d.getTime()+7*864e5),b=new Date(d.getTime()+9*864e5);
   const iso=x=>x.toISOString().slice(0,10);$('start').value=iso(a);$('end').value=iso(b);})();
 
+function setUser(d){
+  USER=d;localStorage.setItem('rental_user',JSON.stringify(USER));
+  const w=$('who');w.className='who on';w.innerHTML='<span class="dot"></span>'+esc(USER.name||USER.email)+' · '+esc(USER.role);
+}
+function clearUser(){
+  USER=null;localStorage.removeItem('rental_user');
+  $('who').className='who';$('who').innerHTML='<span class="dot"></span>未登录';
+}
 async function login(){
-  const phone=$('phone').value.trim();if(!phone)return toast('请输入手机号');
-  try{const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone})});
-    USER=await r.json();const w=$('who');w.className='who on';w.innerHTML='<span class="dot"></span>'+USER.name+' · '+USER.role;
-    toast('登录成功，欢迎你 🎉');loadOrders();}catch(e){toast('登录失败');}
+  const email=$('email').value.trim();const password=$('password').value;
+  if(!email||!password)return toast('请输入邮箱和密码');
+  try{const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
+    const d=await r.json();if(!r.ok)return toast('登录失败：'+errOf(d));
+    setUser(d);toast('登录成功，欢迎你 🎉');loadOrders();}catch(e){toast('登录失败');}
+}
+async function register(){
+  const email=$('email').value.trim();const password=$('password').value;
+  if(!email||!password)return toast('请输入邮箱和密码');
+  try{const r=await fetch('/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
+    const d=await r.json();if(!r.ok)return toast('注册失败：'+errOf(d));
+    setUser(d);toast('注册成功，已登录');loadOrders();}catch(e){toast('注册失败');}
+}
+function restoreUser(){
+  if(!USER)return;
+  const w=$('who');w.className='who on';w.innerHTML='<span class="dot"></span>'+esc(USER.name||USER.email)+' · '+esc(USER.role);
+  if(USER.email)$('email').value=USER.email;
 }
 async function loadCams(){
   try{const d=await (await fetch('/api/cameras?limit=100')).json();CAMS=d.data;
     $('cams').innerHTML=CAMS.map((c,i)=>`<div class="cam" id="cam-${c.id}" tabindex="0" onclick="selCam('${c.id}')" onkeydown="if(event.key==='Enter')selCam('${c.id}')" style="animation-delay:${i*55}ms">
       <span class="pick">${icon('i-check')}</span>
       <div class="thumb">${icon('i-cam')}</div>
-      <div class="nm">${c.name}</div><div class="meta">${c.brand||''}</div>
+      <div class="nm">${esc(c.name)}</div><div class="meta">${esc(c.brand||'')}</div>
       <div class="price tnum">两天 ¥${fmt(c.daily_price)} 起</div></div>`).join('');
   }catch(e){$('cams').innerHTML='<span class="muted">设备加载失败，请确认服务运行中</span>';}
 }
 async function selCam(id){
   SELCAM=id;document.querySelectorAll('.cam').forEach(e=>e.classList.remove('sel'));$('cam-'+id).classList.add('sel');
   const d=await (await fetch('/api/cameras/'+id)).json();CONFIGS=d.configurations;$('cfgFor').textContent=d.name;
-  $('cfg').innerHTML=CONFIGS.map(c=>`<option value="${c.id}">${c.config_name} · 两天¥${fmt(c.two_day_price)} / 三天¥${fmt(c.three_day_price)} / 续租¥${fmt(c.extra_day_price)}/天</option>`).join('');
+  $('cfg').innerHTML=CONFIGS.map(c=>`<option value="${esc(c.id)}">${esc(c.config_name)} · 两天¥${fmt(c.two_day_price)} / 三天¥${fmt(c.three_day_price)} / 续租¥${fmt(c.extra_day_price)}/天</option>`).join('');
   $('cfgCard').style.display='block';observeReveal();clearQuote();$('cfgCard').scrollIntoView({behavior:'smooth',block:'nearest'});
 }
 function clearQuote(){$('quote').classList.remove('show');}
@@ -273,16 +297,16 @@ async function checkQuote(){
     const res=(inv.results||[])[0];const avail=res?res.min_available_in_range:0;const enough=avail>=qty;
     const pr=await (await fetch(`/api/pricing/calculate?camera_config_id=${cfg}&start_date=${s}&end_date=${e}`)).json();
     if(pr.error||pr.detail)return toast(errOf(pr));
-    const p=pr.pricing,days=pr.rental_period.days,dep=Number(pr.deposit);
-    const depRow=dep>0?`<tr><td>押金 ¥${fmt(dep)} × ${qty}件（可退）</td><td>¥${fmt(dep*qty)}</td></tr>`:'';
+    const p=pr.pricing,days=pr.rental_period.days,dep=Number(pr.deposit),rent=Number(p.rent)*qty;
+    const depRow=dep>0?`<tr><td>押金展示 ¥${fmt(dep)} × ${qty}件（无需支付）</td><td>¥${fmt(dep*qty)}</td></tr>`:'';
     $('quote').innerHTML=`
       <div class="qhead">租期 ${days} 天
         ${enough?`<span class="chip ok"><span class="d"></span>有货 · 可租 ${avail} 台</span>`:`<span class="chip no"><span class="d"></span>库存不足 · 仅 ${avail} 台</span>`}</div>
       <table class="tnum">
         <tr><td>计价方式</td><td>${p.basis}</td></tr>
-        <tr><td>租金 × ${qty}件</td><td>¥${fmt(p.rent*qty)}</td></tr>${depRow}
+        <tr><td>租金 × ${qty}件</td><td>¥${fmt(rent)}</td></tr>${depRow}
       </table>
-      <div class="total"><span class="muted">应付总额${dep>0?'（含押金）':''}</span><span class="big tnum">¥${fmt((p.rent+dep)*qty)}</span></div>
+      <div class="total"><span class="muted">应付租金${dep>0?'（押金不计入应付）':''}</span><span class="big tnum">¥${fmt(rent)}</span></div>
       <button style="margin-top:16px;width:100%" ${enough?'':'disabled'} onclick="placeOrder()">${enough?icon('i-check')+'立即下单':'库存不足，无法下单'}</button>`;
     $('quote').classList.add('show');
   }catch(err){toast('查询失败');}finally{btn.disabled=false;btn.textContent='查库存 & 算价格';}
@@ -293,18 +317,20 @@ async function placeOrder(){
   const r=await fetch('/api/orders',{method:'POST',headers:hdrs(true),body:JSON.stringify({items:[{camera_config_id:cfg,quantity:qty}],rental_start:s,rental_end:e})});
   const d=await r.json();if(!r.ok)return toast('下单失败：'+errOf(d));
   toast('下单成功 🎉 '+d.order_id);clearQuote();loadOrders();
-  addBub('a','你的订单 '+d.order_id+' 已创建（待支付），应付 ¥'+fmt(d.total_price)+'。\n'+d.payment_instruction);
+  addBub('a','你的订单 '+d.order_id+' 已创建（待支付），应付租金 ¥'+fmt(d.total_price)+'，押金展示 ¥'+fmt(d.deposit)+'（无需支付）。\n'+d.payment_instruction);
 }
 // 颜色分档: 取消=红, 完结=绿, 其余=黄(进行中)。文案用后端返回的 display_status。
-function stChip(o){const s=o.status;const cls=s==='cancelled'?'no':(s==='completed'?'ok':'warn');return `<span class="chip ${cls}"><span class="d"></span>${o.display_status||s}</span>`;}
+function stChip(o){const s=o.status;const cls=s==='cancelled'?'no':(s==='completed'?'ok':'warn');return `<span class="chip ${cls}"><span class="d"></span>${esc(o.display_status||s)}</span>`;}
 async function loadOrders(){
   if(!USER){$('orders').innerHTML='<span class="muted">登录后查看你的订单</span>';return;}
-  const d=await (await fetch('/api/orders',{headers:hdrs()})).json();const list=d.data||[];
+  const r=await fetch('/api/orders',{headers:hdrs()});
+  if(r.status===401){clearUser();$('orders').innerHTML='<span class="muted">登录已失效，请重新登录</span>';return;}
+  const d=await r.json();const list=d.data||[];
   if(!list.length){$('orders').innerHTML='<span class="muted">还没有订单，去上面挑一台吧 🛒</span>';return;}
   $('orders').innerHTML=list.map(o=>`<div class="o">
-    <div class="top"><span class="oid">${o.order_id}</span>${stChip(o)}</div>
-    <div class="sub tnum">租期 ${o.rental_start} ~ ${o.rental_end}　·　应付 ¥${fmt(o.total_price)}　·　押金 ¥${fmt(o.deposit)}</div>
-    ${o.tracking_no?`<div class="sub tnum">物流：${o.carrier||''} ${o.tracking_no}</div>`:''}
+    <div class="top"><span class="oid">${esc(o.order_id)}</span>${stChip(o)}</div>
+    <div class="sub tnum">租期 ${esc(o.rental_start)} ~ ${esc(o.rental_end)}　·　应付租金 ¥${fmt(o.total_price)}　·　押金展示 ¥${fmt(o.deposit)}（无需支付）</div>
+    ${o.tracking_no?`<div class="sub tnum">物流：${esc(o.carrier||'')} ${esc(o.tracking_no)}</div>`:''}
     ${o.status==='pending_payment'?`<button class="danger sm" style="margin-top:10px" onclick="cancelOrder('${o.order_id}',${o.version})">取消订单</button>`:''}
   </div>`).join('');
 }
@@ -315,7 +341,7 @@ async function cancelOrder(id,ver){
 }
 function addBub(role,text,intent,acts){
   const m=document.createElement('div');m.className='bub '+(role==='u'?'u':'a');
-  m.innerHTML=(intent?`<div class="intent">意图：${intent}</div>`:'')+text.replace(/</g,'&lt;').replace(/\n/g,'<br>');
+  m.innerHTML=(intent?`<div class="intent">意图：${esc(intent)}</div>`:'')+esc(text).replace(/\n/g,'<br>');
   if(acts&&acts.length){const w=document.createElement('div');w.className='acts';
     acts.forEach(a=>{const b=document.createElement('button');b.className='ghost sm';b.textContent=a.label;b.onclick=()=>onAct(a);w.appendChild(b);});m.appendChild(w);}
   $('msgs').appendChild(m);$('msgs').scrollTop=$('msgs').scrollHeight;
@@ -329,7 +355,7 @@ async function send(forced){
     tip.remove();SESSION=d.session_id;addBub('a',d.ai_response,d.detected_intent+' · '+d.confidence,d.next_actions);
   }catch(e){tip.remove();addBub('a','哎呀，网络开小差了，再试一次～');}
 }
-loadCams();observeReveal();
+restoreUser();loadCams();loadOrders();observeReveal();
 </script>
 </body>
 </html>

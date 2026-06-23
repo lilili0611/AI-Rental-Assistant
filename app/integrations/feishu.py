@@ -236,6 +236,25 @@ def _list_all_records(client: httpx.Client, token: str) -> list:
     return items
 
 
+def _push_pending_orders(db) -> int:
+    """重推本地待同步订单，覆盖首次创建飞书记录失败的场景。"""
+    from sqlalchemy import select
+
+    from app.models.order import Order
+
+    pending = db.execute(
+        select(Order).where(Order.sync_status == "sync_pending")
+    ).scalars().all()
+    pushed = 0
+    for order in pending:
+        if push_order(order):
+            order.sync_status = "synced"
+            pushed += 1
+    if pushed:
+        db.commit()
+    return pushed
+
+
 def poll_changes_job():
     """飞书 -> AI: 轮询飞书表, 把人工在飞书的改动回流到本地 (Spec 7)。
 
@@ -253,6 +272,10 @@ def poll_changes_job():
 
     db = SessionLocal()
     try:
+        pushed = _push_pending_orders(db)
+        if pushed:
+            logger.info("飞书补偿重推: 成功 %d 单", pushed)
+
         token = get_tenant_token()
         with httpx.Client(timeout=20) as client:
             records = _list_all_records(client, token)

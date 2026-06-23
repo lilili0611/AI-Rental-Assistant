@@ -1,13 +1,9 @@
-"""API 依赖: 认证与权限 (Spec 6.3)。
-
-MVP 认证: 请求头 X-User-Id 标识用户(真实短信验证码登录后续接入)。
-权限: C 端只能操作自己的数据; B 端 staff/admin 可查看全部。
-"""
+"""API 依赖: 认证与权限。"""
 from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Cookie, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core import security
@@ -19,27 +15,34 @@ STAFF_ROLES = ("staff", "admin", "sales", "warehouse", "finance", "service")
 
 
 def get_optional_user(
-    x_user_id: Optional[str] = Header(default=None),
+    customer_session: Optional[str] = Cookie(default=None),
     db: Session = Depends(get_db),
 ) -> Optional[User]:
     """可选用户(匿名查询允许)。"""
-    if not x_user_id:
+    if not customer_session:
         return None
-    return db.get(User, x_user_id)
+    user_id = security.verify_token(customer_session)
+    return db.get(User, user_id) if user_id else None
 
 
 def get_current_user(
-    x_user_id: Optional[str] = Header(default=None),
+    customer_session: Optional[str] = Cookie(default=None),
     db: Session = Depends(get_db),
 ) -> User:
     """必须认证。order_* 系列接口使用。"""
-    if not x_user_id:
+    if not customer_session:
         raise HTTPException(
             status_code=401,
             detail={"error": "未认证", "error_code": "unauthorized",
-                    "details": "请在请求头 X-User-Id 携带用户标识"},
+                    "details": "请先登录"},
         )
-    user = db.get(User, x_user_id)
+    user_id = security.verify_token(customer_session)
+    if not user_id:
+        raise HTTPException(
+            status_code=401,
+            detail={"error": "登录已失效，请重新登录", "error_code": "invalid_token"},
+        )
+    user = db.get(User, user_id)
     if not user:
         raise HTTPException(
             status_code=401,

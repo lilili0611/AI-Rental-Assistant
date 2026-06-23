@@ -37,9 +37,10 @@ def test_over_three_days_adds_extra():
     assert p.days == 5 and p.extra_days == 2 and p.rent == Decimal("170.00")
 
 
-def test_total_due_adds_deposit():
+def test_total_due_excludes_display_only_deposit():
     p = _p(100, 120, 25, 2000, date(2024, 9, 1), date(2024, 9, 3))
-    assert p.total_due == Decimal("2120.00")
+    assert p.deposit == Decimal("2000.00")
+    assert p.total_due == Decimal("120.00")
 
 
 def test_real_catalog_example_g12_7days():

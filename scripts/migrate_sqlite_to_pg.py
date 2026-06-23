@@ -21,10 +21,22 @@ from __future__ import annotations
 import argparse
 import os
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 
 from app.database import DATABASE_URL  # 已规范化(自动补 +psycopg)
 from app.models import Base  # noqa: F401  导入即注册所有表到 metadata
+
+
+def _ensure_user_email(engine) -> None:
+    """兼容 v2.4 前旧库: users 表可能没有 email 列。"""
+    inspector = inspect(engine)
+    if "users" not in inspector.get_table_names():
+        return
+    cols = {col["name"] for col in inspector.get_columns("users")}
+    with engine.begin() as conn:
+        if "email" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN email VARCHAR(255)"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users (email)"))
 
 
 def main() -> int:
@@ -51,6 +63,8 @@ def main() -> int:
 
     # 1) 目标库建表
     Base.metadata.create_all(dst)
+    _ensure_user_email(src)
+    _ensure_user_email(dst)
 
     tables = list(Base.metadata.sorted_tables)  # 外键安全顺序(父表在前)
 

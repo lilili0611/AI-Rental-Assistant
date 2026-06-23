@@ -1,6 +1,6 @@
 """订单 API (Spec 4.5) + 预留 API。
 
-需认证 (X-User-Id)。C 端只能操作自己的订单; B 端 staff/admin 可操作全部。
+需认证 (租客 HttpOnly Cookie 会话)。C 端只能操作自己的订单; B 端 staff/admin 可操作全部。
 状态推进/确认收款等 B 端操作需 staff 权限。
 """
 from __future__ import annotations
@@ -25,6 +25,7 @@ from app.schemas.order import (
     OrderItemOut,
     OrderOut,
     PaymentConfirmRequest,
+    RentUpdateRequest,
     ReviewRequest,
     ShipRequest,
     StatusAdvanceRequest,
@@ -70,7 +71,7 @@ def _get_owned_order(db: Session, order_id: str, user: User) -> Order:
     order = db.get(Order, order_id)
     if not order:
         raise HTTPException(404, detail={"error": "订单不存在", "error_code": "not_found"})
-    # 🔴 v2.2: 租客端只能操作本人订单; 员工操作走 token 鉴权的后台接口(不靠可伪造的 X-User-Id)
+    # 租客端只能操作本人订单; 员工操作走后台接口。
     if order.user_id != user.id:
         raise HTTPException(403, detail={"error": "无权访问该订单", "error_code": "forbidden"})
     return order
@@ -121,7 +122,7 @@ def list_orders(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    # 🔴 v2.2: 该接口只返回本人订单; 员工查看全部走 token 鉴权的 /orders/admin
+    # 该接口只返回本人订单; 员工查看全部走 /orders/admin
     stmt = select(Order).where(Order.user_id == user.id)
     if status:
         stmt = stmt.where(Order.status == status)
@@ -284,8 +285,25 @@ def review_order(
     order = _fetch_order(db, order_id)
     order = _map_order_errors(lambda: order_service.review_order(
         db, order, approve=body.approve, operator_id=user.id,
-        paid_amount=body.paid_amount, payment_note=body.payment_note,
+        paid_amount=body.paid_amount, rent_amount=body.rent_amount,
+        payment_note=body.payment_note,
         review_note=body.review_note, version=body.version,
+    ))
+    return _order_out(order)
+
+
+@router.post("/orders/{order_id}/rent", response_model=OrderOut)
+def update_order_rent(
+    order_id: str,
+    body: RentUpdateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_staff_user),
+):
+    """商家修改订单租金。押金只展示，不计入应付。"""
+    order = _fetch_order(db, order_id)
+    order = _map_order_errors(lambda: order_service.update_order_rent(
+        db, order, rent_amount=body.rent_amount,
+        operator_id=user.id, version=body.version, reason=body.reason,
     ))
     return _order_out(order)
 

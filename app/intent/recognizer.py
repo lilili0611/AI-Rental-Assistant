@@ -74,7 +74,8 @@ def _rule_intent(message: str) -> IntentResult:
 
 # ============ 实体抽取 ============
 _CAMERA_PATTERN = re.compile(
-    r"(R5C|R5|R6|R7|R8|A7M4|A7R5|A7S3|Z6|Z7|Z8|Z9|GFX|X-T\d|EOS\s*\w+|"
+    r"(G7X2|G12|R10|POCKET\s*3|POCKET3|FLIP|XM5|A620|IXUS\s*110|IXUS110|"
+    r"U300|U400|U1|R5C|R5|R6|R7|R8|A7M4|A7R5|A7S3|Z6|Z7|Z8|Z9|GFX|X-T\d|EOS\s*\w+|"
     r"[0-9]{2,3}-[0-9]{2,3}mm|[0-9]{2,3}mm)",
     re.IGNORECASE,
 )
@@ -82,6 +83,13 @@ _DAYS_PATTERN = re.compile(r"(\d+)\s*天")
 _QTY_PATTERN = re.compile(r"(\d+)\s*(台|个|只)")
 _DATE_PATTERN = re.compile(
     r"(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?|\d{1,2}[-/月]\d{1,2}日?)"
+)
+_CN_NUM = "零一二三四五六七八九十"
+_CN_MONTH_DAY = re.compile(
+    r"([零一二三四五六七八九十\d]{1,3})月([零一二三四五六七八九十\d]{1,3})[号日]?"
+)
+_CN_RANGE_TAIL = re.compile(
+    r"(?:到|至|~|-|—)\s*([零一二三四五六七八九十\d]{1,3})[号日]?"
 )
 
 
@@ -95,6 +103,8 @@ def extract_entities(message: str) -> dict:
         seen = []
         for d in devices:
             d = d.upper().replace(" ", "")
+            if d == "POCKET3":
+                d = "POCKET3"
             if d not in seen:
                 seen.append(d)
         entities["devices"] = seen
@@ -116,6 +126,10 @@ def extract_entities(message: str) -> dict:
 
 def _parse_dates(message: str) -> dict:
     """解析日期区间。支持 'X月Y日到M月N日'、'X天' 推算等。"""
+    cn_dates = _parse_chinese_month_day(message)
+    if cn_dates:
+        return cn_dates
+
     raw = _DATE_PATTERN.findall(message)
     parsed = []
     year = date.today().year
@@ -138,6 +152,80 @@ def _parse_dates(message: str) -> dict:
         if days_m:
             end = parsed[0] + timedelta(days=int(days_m.group(1)) - 1)
             result["end_date"] = end.isoformat()
+    return result
+
+
+def _cn_to_int(raw: str) -> Optional[int]:
+    """解析 1-31 范围内的中文/阿拉伯数字。"""
+    raw = raw.strip()
+    if raw.isdigit():
+        return int(raw)
+    if raw == "十":
+        return 10
+    if "十" in raw:
+        left, _, right = raw.partition("十")
+        tens = 1 if not left else _CN_NUM.find(left)
+        ones = 0 if not right else _CN_NUM.find(right)
+        if tens < 0 or ones < 0:
+            return None
+        return tens * 10 + ones
+    if len(raw) == 1 and raw in _CN_NUM:
+        return _CN_NUM.find(raw)
+    return None
+
+
+def _future_date(year: int, month: int, day: int) -> Optional[date]:
+    """无年份日期默认取今年；若已过去则取下一年。"""
+    try:
+        dt = date(year, month, day)
+    except ValueError:
+        return None
+    if dt < date.today():
+        try:
+            dt = date(year + 1, month, day)
+        except ValueError:
+            return None
+    return dt
+
+
+def _parse_chinese_month_day(message: str) -> dict:
+    """解析“九月一号到五号”“9月1日到9月3日”等中文口语日期。"""
+    matches = list(_CN_MONTH_DAY.finditer(message))
+    if not matches:
+        return {}
+
+    year = date.today().year
+    parsed = []
+    for m in matches:
+        month = _cn_to_int(m.group(1))
+        day = _cn_to_int(m.group(2))
+        if not month or not day:
+            continue
+        dt = _future_date(year, month, day)
+        if dt:
+            parsed.append((dt, m))
+
+    result: dict = {}
+    if len(parsed) >= 2:
+        result["start_date"] = parsed[0][0].isoformat()
+        result["end_date"] = parsed[1][0].isoformat()
+        return result
+
+    if len(parsed) == 1:
+        start, first_match = parsed[0]
+        result["start_date"] = start.isoformat()
+        tail = _CN_RANGE_TAIL.search(message[first_match.end():])
+        if tail:
+            end_day = _cn_to_int(tail.group(1))
+            if end_day:
+                end = _future_date(start.year, start.month, end_day)
+                if end and end < start:
+                    end = _future_date(start.year + 1, start.month, end_day)
+                if end:
+                    result["end_date"] = end.isoformat()
+        elif _DAYS_PATTERN.search(message):
+            days = int(_DAYS_PATTERN.search(message).group(1))
+            result["end_date"] = (start + timedelta(days=days - 1)).isoformat()
     return result
 
 

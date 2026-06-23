@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from app import __version__
 from app.api import auth, cameras, chat, inventory, orders, pricing, reservations
 from app.config import settings
-from app.database import engine
+from app.database import engine, ensure_runtime_schema
 from app.models import Base  # noqa: F401  导入即注册全部模型到 metadata
 from app.scheduler import shutdown_scheduler, start_scheduler
 
@@ -48,6 +48,7 @@ def _auto_seed_if_empty() -> None:
 async def lifespan(app: FastAPI):
     # 启动: 建表 +(可选)自动灌种子 + 启动定时任务
     Base.metadata.create_all(bind=engine)
+    ensure_runtime_schema()
     if settings.auto_seed:
         _auto_seed_if_empty()
     start_scheduler()

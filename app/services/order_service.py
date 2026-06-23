@@ -8,11 +8,12 @@
 """
 from __future__ import annotations
 
-from datetime import date, datetime
+import secrets
+from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import List, Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -94,13 +95,13 @@ class ConflictError(OrderError):
 
 
 def generate_order_id(db: Session) -> str:
-    """生成订单号 ORD + YYYYMMDD + 3 位日内序号。"""
-    today = datetime.now().strftime("%Y%m%d")
-    prefix = f"ORD{today}"
-    count = db.execute(
-        select(func.count()).select_from(Order).where(Order.id.like(f"{prefix}%"))
-    ).scalar_one()
-    return f"{prefix}{count + 1:03d}"
+    """生成订单号 ORD + 日期时间 + 随机数字后缀，避免并发计数撞号。"""
+    prefix = datetime.now().strftime("ORD%Y%m%d%H%M%S")
+    for _ in range(20):
+        order_id = f"{prefix}{secrets.randbelow(10000):04d}"
+        if db.get(Order, order_id) is None:
+            return order_id
+    return f"{prefix}{secrets.randbelow(1_000_000):06d}"
 
 
 def _audit(
@@ -140,6 +141,8 @@ def create_order(
     items: [{"camera_config_id": str, "quantity": int}, ...]
     若带 reservation_id, 复用该预留的占用(转为订单占用); 否则现场校验库存并登记占用。
     """
+    if not items:
+        raise OrderError("订单至少包含一项设备", code="empty_order")
     if rental_end < rental_start:
         raise OrderError("租期结束日不能早于开始日", code="invalid_period")
 
@@ -148,6 +151,26 @@ def create_order(
         reservation = db.get(Reservation, reservation_id)
         if not reservation or reservation.status != "active":
             raise OrderError("预留不存在或已失效", code="reservation_invalid")
+        if reservation.expires_at <= datetime.now():
+            raise OrderError("预留已过期", code="reservation_expired")
+        if reservation.user_id and reservation.user_id != user_id:
+            raise OrderError("无权使用该预留", code="reservation_forbidden")
+        if (
+            len(items) != 1
+            or items[0]["camera_config_id"] != reservation.camera_config_id
+            or int(items[0].get("quantity", 1)) != reservation.quantity
+            or rental_start != reservation.rental_start
+            or rental_end != reservation.rental_end
+        ):
+            raise OrderError("订单内容与预留不匹配", code="reservation_mismatch")
+
+    config_ids = list({item["camera_config_id"] for item in items})
+    locked_configs = db.execute(
+        select(CameraConfig)
+        .where(CameraConfig.id.in_(config_ids))
+        .with_for_update()
+    ).scalars().all()
+    configs_by_id = {c.id: c for c in locked_configs}
 
     order_id = generate_order_id(db)
     order = Order(
@@ -167,7 +190,7 @@ def create_order(
     deposit_sum = Decimal("0")
 
     for item in items:
-        config = db.get(CameraConfig, item["camera_config_id"])
+        config = configs_by_id.get(item["camera_config_id"])
         if not config:
             raise OrderError(
                 f"配置不存在: {item['camera_config_id']}", code="config_not_found"
@@ -234,6 +257,7 @@ def create_order(
     order.subtotal = _money(subtotal_sum)
     order.deposit_amount = _money(deposit_sum)
     order.discount_amount = Decimal("0.00")
+    # 押金只展示不计入平台应付；total_price 表示应付租金。
     order.total_price = _money(subtotal_sum)
 
     db.add(order)
@@ -289,8 +313,11 @@ def confirm_payment(
     """🔴 人工确认收款: pending_payment -> paid。无自动支付逻辑。"""
     _check_version(order, version)
     old = {"status": order.status, "paid_amount": str(order.paid_amount)}
+    received = _money(paid_amount)
+    if received < order.total_price:
+        raise OrderError("已收金额不能低于应付租金", code="underpaid")
     _transition(order, "paid")
-    order.paid_amount = _money(paid_amount)
+    order.paid_amount = received
     order.payment_note = payment_note
     order.version += 1
     order.last_modified_by = operator_id
@@ -335,14 +362,16 @@ def review_order(
     approve: bool,
     operator_id: Optional[str],
     paid_amount: Optional[Decimal] = None,
+    rent_amount: Optional[Decimal] = None,
     payment_note: Optional[str] = None,
     review_note: Optional[str] = None,
     version: Optional[int] = None,
 ) -> Order:
     """🆕 商家审核(Spec 4.8)。
 
-    approve=True: 一步完成「确认收款 + 放行档期」(pending_payment->paid->confirmed),
-                  记录 paid_amount/payment_note, 清空 review_note。
+    approve=True: 可先修改最终租金, 再完成「确认收款 + 放行档期」
+                  (pending_payment->paid->confirmed), 记录 paid_amount/payment_note,
+                  清空 review_note。
     approve=False: 状态留在 pending_payment, 写 review_note(驳回原因)。
     """
     _check_version(order, version)
@@ -351,7 +380,12 @@ def review_order(
             f"当前状态 {order.status} 不可审核(仅商家审核中可审)",
             code="invalid_transition",
         )
-    old = {"status": order.status, "paid_amount": str(order.paid_amount)}
+    old = {
+        "status": order.status,
+        "subtotal": str(order.subtotal),
+        "total_price": str(order.total_price),
+        "paid_amount": str(order.paid_amount),
+    }
 
     if not approve:
         order.review_note = review_note
@@ -367,10 +401,17 @@ def review_order(
         _sync_to_feishu(db, order)
         return order
 
-    # 审核通过: pending_payment -> paid -> confirmed
+    # 审核通过: 可调整最终租金, 再 pending_payment -> paid -> confirmed
+    target_rent = _money(rent_amount) if rent_amount is not None else _money(order.total_price)
+    if target_rent < 0:
+        raise OrderError("租金不能为负数", code="invalid_rent")
+    received = _money(paid_amount) if paid_amount is not None else _money(order.paid_amount)
+    if received < target_rent:
+        raise OrderError("已收金额不能低于应付租金", code="underpaid")
+    if rent_amount is not None:
+        _apply_order_rent(order, target_rent)
     _transition(order, "paid")
-    if paid_amount is not None:
-        order.paid_amount = _money(paid_amount)
+    order.paid_amount = received
     order.payment_note = payment_note
     _transition(order, "confirmed")
     order.review_note = None
@@ -378,9 +419,82 @@ def review_order(
     order.last_modified_by = operator_id
     _audit(
         db, order.id, "review", operator_id, old_value=old,
-        new_value={"status": "confirmed", "approved": True,
-                   "paid_amount": str(order.paid_amount)},
+        new_value={
+            "status": "confirmed",
+            "approved": True,
+            "subtotal": str(order.subtotal),
+            "total_price": str(order.total_price),
+            "paid_amount": str(order.paid_amount),
+        },
         reason=payment_note,
+    )
+    db.commit()
+    db.refresh(order)
+    _sync_to_feishu(db, order)
+    return order
+
+
+def _apply_order_rent(order: Order, rent_amount: Decimal) -> None:
+    """把订单级租金改为商家确认的最终租金，并同步明细小计。"""
+    rent = _money(rent_amount)
+    if rent < 0:
+        raise OrderError("租金不能为负数", code="invalid_rent")
+
+    old_subtotal = _money(order.subtotal)
+    items = list(order.items)
+    order.subtotal = rent
+    order.total_price = rent
+
+    if not items:
+        return
+
+    remaining = rent
+    if old_subtotal > 0:
+        for item in items[:-1]:
+            share = _money(rent * (Decimal(item.subtotal) / old_subtotal))
+            item.subtotal = share
+            remaining -= share
+    else:
+        even = _money(rent / len(items))
+        for item in items[:-1]:
+            item.subtotal = even
+            remaining -= even
+    items[-1].subtotal = _money(remaining)
+
+
+def update_order_rent(
+    db: Session,
+    order: Order,
+    rent_amount: Decimal,
+    operator_id: Optional[str],
+    version: Optional[int] = None,
+    reason: Optional[str] = None,
+) -> Order:
+    """商家修改订单最终租金。押金只展示, 不计入应付。"""
+    _check_version(order, version)
+    if order.status not in ("pending_payment", "paid"):
+        raise OrderError(
+            f"当前状态 {order.status} 不可修改租金(仅商家审核中可改)",
+            code="cannot_modify_rent",
+        )
+    old = {
+        "subtotal": str(order.subtotal),
+        "total_price": str(order.total_price),
+    }
+    new_rent = _money(rent_amount)
+    if order.status == "paid" and _money(order.paid_amount) < new_rent:
+        raise OrderError("已收金额不能低于应付租金", code="underpaid")
+    _apply_order_rent(order, new_rent)
+    order.version += 1
+    order.last_modified_by = operator_id
+    _audit(
+        db, order.id, "rent", operator_id,
+        old_value=old,
+        new_value={
+            "subtotal": str(order.subtotal),
+            "total_price": str(order.total_price),
+        },
+        reason=reason,
     )
     db.commit()
     db.refresh(order)
@@ -451,6 +565,37 @@ def _release_order_occupancy(db: Session, order_id: str) -> None:
         occ.status = "released"
 
 
+def _mark_order_cancelled(
+    db: Session,
+    order: Order,
+    operator_id: Optional[str],
+    cancellation_fee: Decimal,
+    refund_amount: Decimal,
+    reason: Optional[str],
+    change_type: str = "cancel",
+) -> dict:
+    old = {"status": order.status}
+    order.status = "cancelled"
+    order.version += 1
+    order.last_modified_by = operator_id
+    _release_order_occupancy(db, order.id)
+    _audit(
+        db, order.id, change_type, operator_id, old_value=old,
+        new_value={
+            "status": "cancelled",
+            "cancellation_fee": str(cancellation_fee),
+            "refund_amount": str(refund_amount),
+        },
+        reason=reason,
+    )
+    return {
+        "order_id": order.id,
+        "status": "cancelled",
+        "cancellation_fee": cancellation_fee,
+        "refund_amount": refund_amount,
+    }
+
+
 def cancel_order(
     db: Session,
     order: Order,
@@ -460,8 +605,8 @@ def cancel_order(
 ) -> dict:
     """取消订单 (PRD 3.6)。返回退款与手续费明细。
 
-    - pending_payment 且下单 48h 内: 免费, 释放占用
-    - paid / confirmed: 扣 10% 手续费, 退余额
+    - pending_payment: 免费取消, 释放占用
+    - paid / confirmed: 按租金扣 10% 手续费, 退还已收租金余额
     - shipped 及之后: 不可直接取消
     """
     _check_version(order, version)
@@ -473,33 +618,97 @@ def cancel_order(
 
     cancellation_fee = Decimal("0.00")
     if order.status in ("paid", "confirmed"):
-        cancellation_fee = _money(order.total_price * Decimal(str(settings.cancellation_fee_rate)))
+        # 押金未通过平台支付，发货前取消手续费只按租金小计计算。
+        cancellation_fee = _money(order.subtotal * Decimal(str(settings.cancellation_fee_rate)))
     refund_amount = _money(order.paid_amount - cancellation_fee)
     if refund_amount < 0:
         refund_amount = Decimal("0.00")
 
-    old = {"status": order.status}
-    order.status = "cancelled"
-    order.version += 1
-    order.last_modified_by = operator_id
-    _release_order_occupancy(db, order.id)
-    _audit(
-        db, order.id, "cancel", operator_id, old_value=old,
-        new_value={
-            "status": "cancelled",
-            "cancellation_fee": str(cancellation_fee),
-            "refund_amount": str(refund_amount),
-        },
+    result = _mark_order_cancelled(
+        db, order, operator_id,
+        cancellation_fee=cancellation_fee,
+        refund_amount=refund_amount,
         reason=reason,
     )
     db.commit()
     db.refresh(order)
-    return {
-        "order_id": order.id,
-        "status": "cancelled",
-        "cancellation_fee": cancellation_fee,
-        "refund_amount": refund_amount,
-    }
+    _sync_to_feishu(db, order)
+    return result
+
+
+def auto_cancel_stale_orders(
+    db: Session,
+    now: Optional[datetime] = None,
+) -> dict:
+    """自动取消超时未推进的订单, 并释放库存。
+
+    - 客户未付款: pending_payment 且 paid_amount=0, 下单超过配置的 1 小时。
+    - 商家未处理: 已录入收款但未确认档期, 超过配置的 12 小时。
+    """
+    now = now or datetime.now()
+    unpaid_cutoff = now - timedelta(hours=settings.unpaid_order_ttl_hours)
+    merchant_cutoff = now - timedelta(hours=settings.merchant_review_ttl_hours)
+    zero = Decimal("0.00")
+
+    unpaid_orders = db.execute(
+        select(Order)
+        .where(
+            Order.status == "pending_payment",
+            Order.paid_amount <= zero,
+            Order.created_at <= unpaid_cutoff,
+        )
+        .with_for_update()
+    ).scalars().all()
+
+    merchant_unprocessed_orders = db.execute(
+        select(Order)
+        .where(
+            or_(
+                Order.status == "paid",
+                and_(Order.status == "pending_payment", Order.paid_amount > zero),
+            ),
+            Order.updated_at <= merchant_cutoff,
+        )
+        .with_for_update()
+    ).scalars().all()
+
+    cancelled: list[Order] = []
+    stats = {"customer_unpaid": 0, "merchant_unprocessed": 0, "total": 0}
+
+    for order in unpaid_orders:
+        _mark_order_cancelled(
+            db, order, None,
+            cancellation_fee=zero,
+            refund_amount=zero,
+            reason=f"客户超过 {settings.unpaid_order_ttl_hours} 小时未付款，系统自动取消",
+            change_type="auto_cancel",
+        )
+        cancelled.append(order)
+        stats["customer_unpaid"] += 1
+
+    seen = {order.id for order in unpaid_orders}
+    for order in merchant_unprocessed_orders:
+        if order.id in seen:
+            continue
+        _mark_order_cancelled(
+            db, order, None,
+            cancellation_fee=zero,
+            refund_amount=_money(order.paid_amount),
+            reason=f"商家超过 {settings.merchant_review_ttl_hours} 小时未处理，系统自动取消",
+            change_type="auto_cancel",
+        )
+        cancelled.append(order)
+        stats["merchant_unprocessed"] += 1
+
+    if not cancelled:
+        return stats
+
+    stats["total"] = len(cancelled)
+    db.commit()
+    for order in cancelled:
+        db.refresh(order)
+        _sync_to_feishu(db, order)
+    return stats
 
 
 def extend_order(
@@ -557,6 +766,7 @@ def extend_order(
     order.rental_end = new_end_date
     order.subtotal = _money(new_subtotal)
     order.discount_amount = Decimal("0.00")
+    # 押金只展示不计入应付；延期价差只看租金变化。
     order.total_price = _money(new_subtotal)
     order.version += 1
     order.last_modified_by = operator_id

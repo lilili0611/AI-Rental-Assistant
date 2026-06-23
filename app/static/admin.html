@@ -82,7 +82,7 @@
     </div>
     <table>
       <thead><tr>
-        <th>订单号</th><th>客户</th><th>租期</th><th>应付/已收</th><th>状态</th><th>物流</th><th>操作</th>
+        <th>订单号</th><th>客户</th><th>租期</th><th>租金/已收/押金</th><th>状态</th><th>物流</th><th>操作</th>
       </tr></thead>
       <tbody id="rows"><tr><td colspan="7" class="muted">请用员工账号密码登录</td></tr></tbody>
     </table>
@@ -95,6 +95,9 @@
 const $=id=>document.getElementById(id);
 let USER=null, TOKEN=localStorage.getItem('rental_admin_token')||null;
 const fmt=n=>Number(n||0).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});
+const inputAmt=n=>Number(n||0).toFixed(2);
+function parseAmt(v){const n=Number(String(v??'').replace(/,/g,'').trim());return Number.isFinite(n)?n:NaN;}
+function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function toast(m){const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200);}
 function errOf(d){return (d&&d.detail&&(d.detail.error||d.detail.details))||(d&&d.error)||'请求失败';}
 // 🆕 v2.2: 后台凭登录令牌(Bearer), 不再用可伪造的 X-User-Id
@@ -116,13 +119,16 @@ async function login(){
 
 function logout(){TOKEN=null;USER=null;localStorage.removeItem('rental_admin_token');$('who').classList.remove('on');$('whoTxt').textContent='未登录';$('rows').innerHTML='<tr><td colspan="7" class="muted">请用员工账号密码登录</td></tr>';}
 
-function stChip(o){const s=o.status;const cls=s==='cancelled'?'no':(s==='completed'?'ok':'warn');return `<span class="chip ${cls}"><span class="d"></span>${o.display_status||s}</span>`;}
+function stChip(o){const s=o.status;const cls=s==='cancelled'?'no':(s==='completed'?'ok':'warn');return `<span class="chip ${cls}"><span class="d"></span>${esc(o.display_status||s)}</span>`;}
 
 function actBtns(o){
   const v=o.version;
   if(o.status==='pending_payment')
-    return `<button class="ok sm" onclick="review('${o.order_id}',${v},true)">审核通过</button>
+    return `<button class="ghost sm" onclick="editRent('${o.order_id}',${v},${Number(o.total_price)||0})">修改租金</button>
+            <button class="ok sm" onclick="review('${o.order_id}',${v},true,${Number(o.total_price)||0})">审核通过</button>
             <button class="danger sm" onclick="review('${o.order_id}',${v},false)">驳回</button>`;
+  if(o.status==='paid')
+    return `<button class="ghost sm" onclick="editRent('${o.order_id}',${v},${Number(o.total_price)||0})">修改租金</button>`;
   if(o.status==='confirmed')
     return `<button class="sm" onclick="ship('${o.order_id}',${v})">上传物流并发货</button>`;
   if(o.status==='shipped')
@@ -136,16 +142,16 @@ async function load(){
   const r=await fetch('/api/orders/admin'+(f?('?status='+f):''),{headers:hdrs()});
   if(r.status===401){logout();toast('登录已失效，请重新登录');return;}
   const d=await r.json();
-  if(!r.ok){$('rows').innerHTML=`<tr><td colspan="7" class="muted">${errOf(d)}</td></tr>`;return;}
+  if(!r.ok){$('rows').innerHTML=`<tr><td colspan="7" class="muted">${esc(errOf(d))}</td></tr>`;return;}
   const list=d.data||[];$('count').textContent=list.length+' 单';
   if(!list.length){$('rows').innerHTML='<tr><td colspan="7" class="muted">暂无订单</td></tr>';return;}
   $('rows').innerHTML=list.map(o=>`<tr>
-    <td class="oid tnum">${o.order_id}</td>
-    <td class="muted tnum">${(o.user_id||'').slice(0,8)}</td>
-    <td class="tnum">${o.rental_start} ~ ${o.rental_end}</td>
-    <td class="tnum">¥${fmt(o.total_price)} / ¥${fmt(o.paid_amount)}</td>
+    <td class="oid tnum">${esc(o.order_id)}</td>
+    <td class="muted tnum">${esc((o.user_id||'').slice(0,8))}</td>
+    <td class="tnum">${esc(o.rental_start)} ~ ${esc(o.rental_end)}</td>
+    <td class="tnum">租金 ¥${fmt(o.total_price)} / 已收 ¥${fmt(o.paid_amount)}<br><span class="muted">押金展示 ¥${fmt(o.deposit)}（无需支付）</span></td>
     <td>${stChip(o)}</td>
-    <td class="tnum">${o.tracking_no?((o.carrier||'')+' '+o.tracking_no):'<span class="muted">—</span>'}</td>
+    <td class="tnum">${o.tracking_no?(esc(o.carrier||'')+' '+esc(o.tracking_no)):'<span class="muted">—</span>'}</td>
     <td class="acts">${actBtns(o)}</td>
   </tr>`).join('');
 }
@@ -156,12 +162,27 @@ async function post(id,path,body){
   const d=await r.json();if(!r.ok){toast(errOf(d));return false;}return true;
 }
 
-async function review(id,ver,approve){
+async function editRent(id,ver,currentRent){
+  const rentText=prompt('请输入最终租金（押金不计入应付）：',inputAmt(currentRent));
+  if(rentText===null)return;
+  const rent=parseAmt(rentText);
+  if(!Number.isFinite(rent)||rent<0)return toast('租金金额不正确');
+  const reason=prompt('修改原因（可留空）：','')||'';
+  if(await post(id,'rent',{rent_amount:rent,reason,version:ver})){toast('租金已更新');load();}
+}
+
+async function review(id,ver,approve,currentRent){
   if(approve){
-    const amt=prompt('确认已收到付款。请输入已收金额：');
-    if(amt===null)return;
+    const rentText=prompt('最终租金（押金不计入应付）：',inputAmt(currentRent));
+    if(rentText===null)return;
+    const rent=parseAmt(rentText);
+    if(!Number.isFinite(rent)||rent<0)return toast('租金金额不正确');
+    const amtText=prompt('确认线下已收租金金额：',inputAmt(rent));
+    if(amtText===null)return;
+    const amt=parseAmt(amtText);
+    if(!Number.isFinite(amt)||amt<0)return toast('已收金额不正确');
     const note=prompt('收款备注（如：微信转账，可留空）','')||'';
-    if(await post(id,'review',{approve:true,paid_amount:Number(amt)||0,payment_note:note,version:ver})){toast('已审核通过，档期已确认');load();}
+    if(await post(id,'review',{approve:true,rent_amount:rent,paid_amount:amt,payment_note:note,version:ver})){toast('已审核通过，档期已确认');load();}
   }else{
     const reason=prompt('驳回原因（如：未收到款）：');
     if(reason===null)return;

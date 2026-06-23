@@ -60,13 +60,15 @@ def _handle_device_query(db: Session, entities: dict) -> dict:
             return {"text": "目前还没有上架设备。"}
         lines = ["我们目前提供以下设备："]
         for c in cameras:
-            lines.append(f"• {c.name}（{c.brand}）参考日租 ¥{c.daily_price}")
+            lines.append(f"• {c.name}（{c.brand}）两天 ¥{c.daily_price} 起")
         return {"text": "\n".join(lines)}
     lines = []
     for cfg in configs:
         acc = "、".join(cfg.accessories) if cfg.accessories else "无附加"
         lines.append(
-            f"• {cfg.config_name}：日租 ¥{cfg.daily_price}，押金 ¥{cfg.deposit_amount}，配件：{acc}"
+            f"• {cfg.config_name}：两天 ¥{cfg.two_day_price}，"
+            f"三天 ¥{cfg.three_day_price}，续租 ¥{cfg.extra_day_price}/天，"
+            f"押金 ¥{cfg.deposit_amount}，配件：{acc}"
         )
     return {"text": "为你找到以下配置：\n" + "\n".join(lines)}
 
@@ -91,8 +93,8 @@ def _handle_pricing_query(db: Session, entities: dict) -> dict:
         f"{cfg.config_name} 租 {price.days} 天（{start}~{end}）：\n"
         f"• 计价：{price.basis}\n"
         f"• 租金 ¥{price.rent}\n"
-        f"• 押金 ¥{price.deposit}\n"
-        f"• 应付总额 ¥{price.total_due}"
+        f"• 押金 ¥{price.deposit}（仅展示，不计入应付）\n"
+        f"• 应付租金 ¥{price.total_due}"
     )
     return {
         "text": text,

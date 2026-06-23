@@ -15,6 +15,7 @@ class User(Base, UUIDPKMixin, TimestampMixin):
     phone: Mapped[str] = mapped_column(
         String(20), unique=True, nullable=False, index=True
     )
+    email: Mapped[Optional[str]] = mapped_column(String(255), unique=True, index=True)
     name: Mapped[Optional[str]] = mapped_column(String(100))
     is_authenticated: Mapped[bool] = mapped_column(Boolean, default=False)
     # 敏感信息加密存储 (AES)
