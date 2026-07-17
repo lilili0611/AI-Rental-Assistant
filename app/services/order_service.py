@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import secrets
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from typing import List, Optional
 
@@ -651,7 +651,10 @@ def auto_cancel_stale_orders(
     - 客户未付款: pending_payment 且 paid_amount=0, 下单超过配置的 1 小时。
     - 商家未处理: 已录入收款但未确认档期, 超过配置的 12 小时。
     """
-    now = now or datetime.now()
+    # created_at/updated_at 由数据库 CURRENT_TIMESTAMP 生成；SQLite 与生产数据库
+    # 通常都按 UTC 保存无时区值。这里统一用 UTC naive 比较，避免上海时区下新订单
+    # 被误判为已创建 8 小时而立即取消。显式传入 now 的测试/批处理仍按调用方基准。
+    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
     unpaid_cutoff = now - timedelta(hours=settings.unpaid_order_ttl_hours)
     merchant_cutoff = now - timedelta(hours=settings.merchant_review_ttl_hours)
     zero = Decimal("0.00")

@@ -6,6 +6,7 @@ from app.models.inventory import InventoryUnit, Occupancy
 from app.models.order import Order, OrderItem, OrderChange
 from app.models.reservation import Reservation
 from app.models.conversation import Conversation
+from app.models.companion import CompanionEvent, OrderFeedback
 
 __all__ = [
     "Base",
@@ -20,4 +21,6 @@ __all__ = [
     "OrderChange",
     "Reservation",
     "Conversation",
+    "CompanionEvent",
+    "OrderFeedback",
 ]

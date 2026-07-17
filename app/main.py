@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import __version__
-from app.api import auth, cameras, chat, cron, inventory, orders, pricing, reservations
+from app.api import auth, cameras, chat, companion, cron, inventory, orders, pricing, reservations
 from app.config import settings
 from app.database import engine, ensure_runtime_schema
 from app.models import Base  # noqa: F401  导入即注册全部模型到 metadata
@@ -70,7 +70,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="相机租赁 AI 助手",
     version=__version__,
-    description="相机租赁与猫猫头导购助手（FAQ 优先，LLM 安全兜底）",
+    description="相机租赁与猫猫头全流程陪伴助手（知识库优先，LLM 安全兜底）",
     lifespan=lifespan,
 )
 
@@ -86,6 +86,7 @@ app.include_router(cameras.router)
 app.include_router(inventory.router)
 app.include_router(pricing.router)
 app.include_router(chat.router)
+app.include_router(companion.router)
 app.include_router(reservations.router)
 app.include_router(orders.router)
 app.include_router(cron.router)

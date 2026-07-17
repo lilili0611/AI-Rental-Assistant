@@ -13,7 +13,7 @@
 1. **Railway / Render：单实例 / 1 worker**。APScheduler 在进程内跑（预留扫描、飞书轮询），**不要**开多实例/多 worker，否则定时任务重复执行。`Procfile` 已写死 `--workers 1`。
 2. **Railway / Render：SQLite 必须挂持久盘**。否则重部署/休眠后数据清零。下面每个平台说明里都配了卷。数据量大了再改 `DATABASE_URL` 迁 PostgreSQL（代码无需改）。
 3. **Vercel：不要用 SQLite 文件做生产库**。Vercel Function 文件系统不可作为持久数据库，必须配置外部 Postgres 连接串。
-4. **Vercel：自动取消/飞书补偿同步走 `/api/cron/sweep`**。Hobby 计划只使用每天一次的 Vercel Cron，因此超时订单会在每日定时任务运行时批量取消；若要严格执行 1 小时未付款自动取消，需要升级 Pro、使用外部定时器每小时调用该接口，或改用 Railway/Render/服务器。
+4. **Vercel：自动取消、飞书补偿同步和陪伴提醒走 `/api/cron/sweep`**。Hobby 计划只使用每天一次的 Vercel Cron；用户打开订单陪伴页时会即时补齐应有提醒。若要严格按小时主动触达，需要升级 Pro、使用外部定时器，或改用 Railway/Render/服务器。
 5. **必须设的环境变量**：
    - `ENCRYPTION_KEY`：强随机串（关系到密码哈希 + 登录令牌签名）。本地生成：`python3 -c "import secrets;print(secrets.token_urlsafe(48))"`
    - `DATABASE_URL`：Railway / Render 可指向持久盘 SQLite；Vercel 必须指向 Postgres/Supabase/Neon
@@ -59,6 +59,7 @@
 4. 部署后访问 Vercel 临时域名的 `/health` 验证。
 5. Project Settings → Domains 添加 `bozipaopao.cn` 和 `admin.bozipaopao.cn`。
 6. 到域名服务商处配置 DNS：根域名通常指向 Vercel 的 A 记录 `76.76.21.21`，`admin` 子域名通常配置 CNAME 到 Vercel 提示的目标；以 Vercel Domains 页面提示为准。
+7. 验证 `/api/chat` 可连续完成导购反问；登录后验证订单“陪伴服务”。未配置物流提供器时，位置和预计送达必须为空并显示降级说明。
 
 ## 正式域名规划
 

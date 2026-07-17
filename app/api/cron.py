@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from app.config import settings
 from app.database import SessionLocal
-from app.services import order_service, reservation_service
+from app.services import companion_service, order_service, reservation_service
 
 router = APIRouter(prefix="/api/cron", tags=["cron"])
 
@@ -31,6 +31,7 @@ def sweep(request: Request):
     try:
         expired_reservations = reservation_service.sweep_expired(db)
         cancelled_orders = order_service.auto_cancel_stale_orders(db)
+        companion_events = companion_service.sweep_events(db)
     finally:
         db.close()
 
@@ -45,5 +46,6 @@ def sweep(request: Request):
         "ok": True,
         "expired_reservations": expired_reservations,
         "cancelled_orders": cancelled_orders,
+        "companion_events": companion_events,
         "feishu_polled": feishu_polled,
     }

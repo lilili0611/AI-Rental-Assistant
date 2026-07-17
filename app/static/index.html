@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
+  <link rel="icon" type="image/png" href="/static/mascot.png" />
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>猫猫头相机租赁 · 租客自助下单</title>
@@ -220,7 +221,7 @@
   <div class="card chat reveal">
     <div class="sechead"><span class="n" style="background:transparent;box-shadow:none;width:38px;height:38px"><img src="/static/mascot.png" alt="猫猫" style="width:38px;height:38px;object-fit:contain"></span><h2>猫猫小助手</h2></div>
     <div class="msgs" id="msgs">
-      <div class="bub a">喵～我是猫猫小助手 🐱 可以帮你查设备、库存、价格。试试问我：「R10 九月一号到五号多少钱」</div>
+      <div class="bub a">喵～我是你的全流程陪伴助手 🐱 我会先了解拍摄场景，再帮你选设备、查库存、问免押并带入下单；发货后还能查看物流、使用指南和归还提醒。</div>
     </div>
     <div class="chatbar">
       <input id="chatin" placeholder="想租点啥？问我吧…" onkeydown="if(event.key==='Enter')send()" aria-label="聊天输入"/>
@@ -331,7 +332,11 @@ async function loadOrders(){
     <div class="top"><span class="oid">${esc(o.order_id)}</span>${stChip(o)}</div>
     <div class="sub tnum">租期 ${esc(o.rental_start)} ~ ${esc(o.rental_end)}　·　应付租金 ¥${fmt(o.total_price)}　·　押金展示 ¥${fmt(o.deposit)}（无需支付）</div>
     ${o.tracking_no?`<div class="sub tnum">物流：${esc(o.carrier||'')} ${esc(o.tracking_no)}</div>`:''}
-    ${o.status==='pending_payment'?`<button class="danger sm" style="margin-top:10px" onclick="cancelOrder('${o.order_id}',${o.version})">取消订单</button>`:''}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+      ${o.status!=='cancelled'?`<button class="ghost sm" onclick="showCompanion('${o.order_id}')">🐾 陪伴服务</button>`:''}
+      ${o.status==='completed'?`<button class="ghost sm" onclick="submitFeedback('${o.order_id}')">⭐ 评价与分享</button>`:''}
+      ${o.status==='pending_payment'?`<button class="danger sm" onclick="cancelOrder('${o.order_id}',${o.version})">取消订单</button>`:''}
+    </div>
   </div>`).join('');
 }
 async function cancelOrder(id,ver){
@@ -346,7 +351,37 @@ function addBub(role,text,intent,acts){
     acts.forEach(a=>{const b=document.createElement('button');b.className='ghost sm';b.textContent=a.label;b.onclick=()=>onAct(a);w.appendChild(b);});m.appendChild(w);}
   $('msgs').appendChild(m);$('msgs').scrollTop=$('msgs').scrollHeight;
 }
-function onAct(a){if(a.action==='order_create')toast('请在左侧选择配置和日期，点“立即下单”');else if(a.action.startsWith('confirm:'))send('确认');else send(a.label);}
+async function onAct(a){
+  if(a.action==='prefill_order'){
+    const p=a.payload||{};if(!p.camera_id||!p.config_id)return toast('下单信息不完整，请重新咨询');
+    await selCam(p.camera_id);$('cfg').value=p.config_id;$('start').value=p.start_date;$('end').value=p.end_date;$('qty').value=p.quantity||1;
+    $('cfgCard').scrollIntoView({behavior:'smooth',block:'start'});await checkQuote();toast('已带入设备和租期，请核对后点击立即下单');
+  }else if(a.action==='open_url'){
+    const url=(a.payload||{}).url||'';if(/^https:\/\//.test(url))window.open(url,'_blank','noopener');
+  }else if(a.action==='order_create')toast('请在左侧选择配置和日期，点“立即下单”');
+  else if(a.action.startsWith('confirm:'))send('确认');else send(a.label);
+}
+async function showCompanion(id){
+  try{
+    const r=await fetch(`/api/orders/${id}/companion`);const d=await r.json();if(!r.ok)return toast(errOf(d));
+    const log=d.logistics||{},ret=d.return_guide||{},guides=d.device_guides||[],events=d.events||[];
+    const guideText=guides.map(g=>`${g.name}：${g.summary}\n上手：${g.quick_start.join('；')}\n设置：${g.setting_tips.join('；')}`).join('\n\n');
+    const eventText=events.filter(e=>e.status==='unread').map(e=>`🔔 ${e.title}：${e.message}`).join('\n');
+    const text=`当前阶段：${d.phase_label}\n物流：${log.carrier||'待填写'} ${log.tracking_no||''}\n${log.notice}\n\n${guideText||'设备指南将在发货后提供'}\n\n归还：${ret.message}\n${ret.packing_tip}${eventText?'\n\n'+eventText:''}`;
+    const acts=[];const official=guides.find(g=>g.guide_url);if(official)acts.push({label:'打开官方指南',action:'open_url',payload:{url:official.guide_url}});
+    if(ret.outlet_query_url)acts.push({label:'腾讯地图查顺丰网点',action:'open_url',payload:{url:ret.outlet_query_url}});
+    addBub('a',text,'全流程陪伴',acts);
+    events.filter(e=>e.status==='unread').forEach(e=>fetch(`/api/orders/${id}/companion/events/${e.id}/read`,{method:'POST'}));
+  }catch(e){toast('陪伴信息加载失败');}
+}
+async function submitFeedback(id){
+  const raw=prompt('请给本次体验打分（1-5星）','5');if(raw===null)return;const rating=Number(raw);
+  if(!Number.isInteger(rating)||rating<1||rating>5)return toast('评分请输入1到5的整数');
+  const comment=prompt('想对设备或服务说些什么？（可留空）','')||'';
+  const share=prompt('可选：粘贴使用该设备拍摄的作品链接；留空则不分享','')||'';
+  const body={rating,comment,share_url:share||null,showcase_allowed:!!share&&confirm('是否授权在猫猫头作品社区公开展示该链接？')};
+  try{const r=await fetch(`/api/orders/${id}/feedback`,{method:'POST',headers:hdrs(true),body:JSON.stringify(body)});const d=await r.json();if(!r.ok)return toast(errOf(d));toast('谢谢你的评价，猫猫头收到啦 🐾');loadOrders();}catch(e){toast('评价提交失败');}
+}
 async function send(forced){
   const txt=forced||$('chatin').value.trim();if(!txt)return;if(!forced)$('chatin').value='';addBub('u',txt);
   const tip=document.createElement('div');tip.className='typing';tip.innerHTML='<span class="spin"></span> 猫猫思考中…';
@@ -355,7 +390,7 @@ async function send(forced){
     tip.remove();SESSION=d.session_id;addBub('a',d.ai_response,d.detected_intent+' · '+d.confidence,d.next_actions);
   }catch(e){tip.remove();addBub('a','哎呀，网络开小差了，再试一次～');}
 }
-restoreUser();loadCams();loadOrders();observeReveal();
+restoreUser();loadCams();loadOrders();observeReveal();setInterval(()=>{if(USER)loadOrders();},60000);
 </script>
 </body>
 </html>

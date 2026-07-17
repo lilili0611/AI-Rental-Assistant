@@ -341,6 +341,17 @@ def test_auto_cancel_keeps_recent_unpaid_order(db, seeded):
     assert order.status == "pending_payment"
 
 
+def test_auto_cancel_default_clock_keeps_just_created_database_timestamp(db, seeded):
+    """数据库 UTC 时间戳与默认扫描时钟必须使用同一基准。"""
+    order = _create_order(db, seeded)
+
+    stats = order_service.auto_cancel_stale_orders(db)
+    db.refresh(order)
+
+    assert stats == {"customer_unpaid": 0, "merchant_unprocessed": 0, "total": 0}
+    assert order.status == "pending_payment"
+
+
 def test_auto_cancel_paid_unprocessed_after_twelve_hours(db, seeded):
     """已收款但商家超过 12 小时未确认档期: 自动取消, 不收手续费。"""
     from app.services import inventory_service

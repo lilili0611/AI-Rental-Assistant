@@ -25,12 +25,55 @@ from app.intent.recognizer import AUTH_REQUIRED, MONEY_SENSITIVE, IntentResult
 from app.knowledge_base import faq, guide
 from app.models.camera import Camera, CameraConfig
 from app.models.conversation import Conversation
-from app.services import inventory_service, pricing_service
+from app.services import inventory_service, pricing_service, sales_guide, usage_support
 from app.services.session_store import get_session_store
 
 
 def _new_session_id() -> str:
     return str(uuid.uuid4())
+
+
+def _empty_session(session_id: str, user_id: Optional[str]) -> dict:
+    return {
+        "session_id": session_id,
+        "user_id": user_id,
+        "round": 0,
+        "history": [],
+        "context": {},
+        "intents": [],
+        "sales_journey": {},
+    }
+
+
+def _restore_session(db: Session, session_id: str, user_id: Optional[str]) -> dict:
+    """Vercel 多实例下进程内会话丢失时，从持久化对话恢复最近上下文。"""
+    rows = db.execute(
+        select(Conversation)
+        .where(Conversation.session_id == session_id)
+        .order_by(Conversation.round_number.desc())
+        .limit(5)
+    ).scalars().all()
+    if not rows:
+        return _empty_session(session_id, user_id)
+    rows.reverse()
+    last = rows[-1]
+    last_entities = last.entities or {}
+    return {
+        "session_id": session_id,
+        "user_id": user_id or last.user_id,
+        "round": last.round_number,
+        "history": [
+            item
+            for row in rows
+            for item in (
+                {"role": "user", "content": row.user_message or ""},
+                {"role": "assistant", "content": row.ai_response or ""},
+            )
+        ],
+        "context": last_entities,
+        "intents": [row.detected_intent for row in rows if row.detected_intent],
+        "sales_journey": dict(last_entities.get("sales_journey", {})),
+    }
 
 
 def _resolve_configs(db: Session, devices: List[str]) -> List[CameraConfig]:
@@ -176,13 +219,9 @@ def handle_message(
     store = get_session_store()
     if not session_id:
         session_id = _new_session_id()
-        session = {"session_id": session_id, "user_id": user_id, "round": 0,
-                   "history": [], "context": {}, "intents": []}
+        session = _empty_session(session_id, user_id)
     else:
-        session = store.get(session_id) or {
-            "session_id": session_id, "user_id": user_id, "round": 0,
-            "history": [], "context": {}, "intents": []
-        }
+        session = store.get(session_id) or _restore_session(db, session_id, user_id)
 
     round_no = session["round"] + 1
     actions = []
@@ -195,57 +234,86 @@ def handle_message(
         actions = [{"type": "handoff", "label": "转人工", "action": "human_handoff"}]
         answer_source = "human"
     else:
-        # 2. 客服知识库优先，命中时原样返回，不调用 LLM 润色。
-        knowledge_match = faq.search(message)
-        if knowledge_match:
+        # 2. 设备操作与简单故障排查；危险情况直接转人工。
+        support = usage_support.answer(message)
+        if support:
             intent = IntentResult(
-                intent="knowledge_qa",
-                confidence=knowledge_match.score,
-                entities={"knowledge_entry_id": knowledge_match.entry.entry_id},
+                intent="usage_support",
+                confidence=0.95,
+                entities={},
                 source="knowledge_base",
             )
-            text = knowledge_match.entry.answer
-            answer_source = "knowledge_base"
+            text = support["text"]
+            actions = support.get("actions", [])
+            answer_source = "human" if support.get("human") else "knowledge_base"
         else:
-            # 3. 设备、实时库存、价格与订单继续走结构化业务能力。
-            intent = recognizer.recognize(message)
-            if multi_turn:
-                merged = dict(session.get("context", {}))
-                merged.update({k: v for k, v in intent.entities.items() if v})
-                intent.entities = merged
-
-            decision = _decide(intent)
-            if decision == "human":
-                text, actions, answer_source = _fallback_or_handoff(
-                    message, session.get("history", [])
+            # 3. 主动导购流程优先处理“推荐/怎么选”等需求，每轮只反问一个关键信息。
+            guided = sales_guide.process(db, message, session.setdefault("sales_journey", {}))
+        if not support and guided:
+            session["sales_journey"] = guided["journey"]
+            intent = IntentResult(
+                intent="guided_sales",
+                confidence=0.95,
+                entities={"sales_journey": guided["journey"]},
+                source="workflow",
+            )
+            text = guided["text"]
+            actions = guided.get("actions", [])
+            answer_source = "workflow"
+        elif not support:
+            # 4. 客服知识库优先，命中时原样返回，不调用 LLM 润色。
+            knowledge_match = faq.search(message)
+            if knowledge_match:
+                intent = IntentResult(
+                    intent="knowledge_qa",
+                    confidence=knowledge_match.score,
+                    entities={"knowledge_entry_id": knowledge_match.entry.entry_id},
+                    source="knowledge_base",
                 )
-            elif decision == "confirm":
-                text = _confirm_prompt(intent)
-                actions = [
-                    {"type": "button", "label": "是的", "action": f"confirm:{intent.intent}"},
-                    {"type": "button", "label": "不是", "action": "reject"},
-                ]
-            elif intent.intent in MONEY_SENSITIVE:
-                # 金钱操作即使高置信度也二次确认。
-                text = _money_confirm_prompt(intent)
-                actions = [
-                    {"type": "button", "label": "确认", "action": f"confirm:{intent.intent}"},
-                    {"type": "button", "label": "取消", "action": "reject"},
-                ]
+                text = knowledge_match.entry.answer
+                answer_source = "knowledge_base"
             else:
-                handler = _HANDLERS.get(intent.intent)
-                if _is_general_shopping_question(message, intent):
+                # 5. 设备、实时库存、价格与订单继续走结构化业务能力。
+                intent = recognizer.recognize(message)
+                if multi_turn:
+                    merged = {
+                        k: v for k, v in session.get("context", {}).items()
+                        if k != "sales_journey"
+                    }
+                    merged.update({k: v for k, v in intent.entities.items() if v})
+                    intent.entities = merged
+
+                decision = _decide(intent)
+                if decision == "human":
                     text, actions, answer_source = _fallback_or_handoff(
                         message, session.get("history", [])
                     )
-                elif handler:
-                    result = handler(db, intent.entities)
-                    text = result["text"]
-                    actions = result.get("actions", [])
+                elif decision == "confirm":
+                    text = _confirm_prompt(intent)
+                    actions = [
+                        {"type": "button", "label": "是的", "action": f"confirm:{intent.intent}"},
+                        {"type": "button", "label": "不是", "action": "reject"},
+                    ]
+                elif intent.intent in MONEY_SENSITIVE:
+                    text = _money_confirm_prompt(intent)
+                    actions = [
+                        {"type": "button", "label": "确认", "action": f"confirm:{intent.intent}"},
+                        {"type": "button", "label": "取消", "action": "reject"},
+                    ]
                 else:
-                    text, actions, answer_source = _fallback_or_handoff(
-                        message, session.get("history", [])
-                    )
+                    handler = _HANDLERS.get(intent.intent)
+                    if _is_general_shopping_question(message, intent):
+                        text, actions, answer_source = _fallback_or_handoff(
+                            message, session.get("history", [])
+                        )
+                    elif handler:
+                        result = handler(db, intent.entities)
+                        text = result["text"]
+                        actions = result.get("actions", [])
+                    else:
+                        text, actions, answer_source = _fallback_or_handoff(
+                            message, session.get("history", [])
+                        )
 
     # 更新会话
     session["round"] = round_no

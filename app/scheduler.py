@@ -2,6 +2,7 @@
 
 - 每分钟扫描过期预留并释放占用 (Spec 3.2)。
 - 每分钟扫描超时订单并自动取消释放占用。
+- 每小时扫描一次租中、归还和租后陪伴提醒。
 - (Phase 2) 飞书轮询任务在 feishu_enabled 时启用。
 """
 from __future__ import annotations
@@ -12,7 +13,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.config import settings
 from app.database import SessionLocal
-from app.services import order_service, reservation_service
+from app.services import companion_service, order_service, reservation_service
 
 logger = logging.getLogger("scheduler")
 _scheduler: BackgroundScheduler = None
@@ -47,6 +48,18 @@ def _sweep_orders():
         db.close()
 
 
+def _sweep_companion():
+    db = SessionLocal()
+    try:
+        stats = companion_service.sweep_events(db)
+        if stats["events_created"]:
+            logger.info("新增陪伴提醒 %d 个", stats["events_created"])
+    except Exception:  # noqa: BLE001
+        logger.exception("陪伴提醒扫描失败")
+    finally:
+        db.close()
+
+
 def start_scheduler() -> BackgroundScheduler:
     global _scheduler
     if _scheduler is not None:
@@ -54,6 +67,7 @@ def start_scheduler() -> BackgroundScheduler:
     _scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
     _scheduler.add_job(_sweep_reservations, "interval", minutes=1, id="sweep_reservations")
     _scheduler.add_job(_sweep_orders, "interval", minutes=1, id="sweep_orders")
+    _scheduler.add_job(_sweep_companion, "interval", hours=1, id="sweep_companion")
 
     if settings.feishu_enabled:
         from app.integrations import feishu

@@ -22,11 +22,11 @@ def test_knowledge_base_has_priority_and_does_not_call_llm(db, monkeypatch):
         raise AssertionError("知识库命中时不应调用 LLM")
 
     monkeypatch.setattr(guide.llm, "chat_completion", should_not_call)
-    result = chat_service.handle_message(db, "去川西旅游应该租什么相机？")
+    result = chat_service.handle_message(db, "可以开发票吗？")
 
     assert result["detected_intent"] == "knowledge_qa"
     assert result["answer_source"] == "knowledge_base"
-    assert "索尼A7M4" in result["ai_response"]
+    assert result["ai_response"] == "目前不支持"
     assert guide.AI_LABEL not in result["ai_response"]
     ChatResponse.model_validate(result)
 
@@ -49,7 +49,7 @@ def test_unknown_reasonable_question_uses_marked_50_char_llm_fallback(db, monkey
     long_answer = "建议优先选择轻便机身和带防抖的标准变焦镜头，兼顾夜景、人像与旅行携带，先确认重量再决定。" * 2
     monkeypatch.setattr(guide.llm, "chat_completion", lambda *args, **kwargs: long_answer)
 
-    result = chat_service.handle_message(db, "室内拍宠物但知识库没有对应场景，怎么选？")
+    result = chat_service.handle_message(db, "构图时如何让主体更突出？")
 
     assert result["answer_source"] == "llm"
     assert result["ai_response"].startswith(f"{guide.AI_LABEL}\n")
@@ -78,7 +78,7 @@ def test_unreasonable_detection_is_not_dependent_on_word_order():
 def test_llm_unavailable_returns_exact_human_response(db, monkeypatch):
     monkeypatch.setattr(guide.llm, "llm_available", lambda: False)
 
-    result = chat_service.handle_message(db, "室内拍宠物怎么选相机？")
+    result = chat_service.handle_message(db, "构图时如何让主体更突出？")
 
     assert result["ai_response"] == "请咨询人工"
     assert result["answer_source"] == "human"

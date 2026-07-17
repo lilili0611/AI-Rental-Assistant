@@ -1,6 +1,6 @@
 # 相机租赁 AI 助手系统
 
-对接飞书数据、面向客户与内部员工的 AI 租赁管理助手。本仓库实现 **Phase 1（自助查询）+ Phase 2（订单与同步）**，并加入猫猫头导购知识问答。
+对接飞书数据、面向客户与内部员工的 AI 租赁管理助手。当前 **v2.8** 已实现猫猫头主动导购与租前、租中、租后全流程陪伴。
 
 线上地址：[https://bozipaopao.cn/](https://bozipaopao.cn/)（Vercel 托管）。
 
@@ -21,6 +21,7 @@
 | 定时任务 | APScheduler（替代 Celery，扫描预留过期与订单超时）|
 | 知识问答 | 52 条真实客服 FAQ 本地检索，知识库优先 |
 | LLM | DeepSeek（OpenAI 兼容；仅兜底合理的未知导购问题）|
+| 全流程陪伴 | 多轮反问导购、免押说明、下单带入、设备指南、站内提醒与租后反馈 |
 | 飞书 | httpx 直连（Phase 2，默认关闭）|
 
 ## 已落实的 6 项关键修正（对照 Spec §10）
@@ -63,7 +64,7 @@ source .venv/bin/activate
 pytest -q
 ```
 
-覆盖 Spec §9/§13 关键路径：按日期库存、折扣叠加与边界、预留过期释放、订单状态机、乐观锁冲突、人工收款、超时订单自动取消、知识库优先、导购同义问法、LLM 50 字限制和不合理请求转人工。
+覆盖 Spec §9/§13/§14 关键路径：按日期库存、价格边界、预留释放、订单状态机、乐观锁、人工收款、知识库优先、LLM 50 字限制、不合理请求转人工、多轮导购、会话恢复、免押与下单带入、陪伴阶段、幂等提醒、安全排障和租后反馈。
 
 ## 主要 API
 
@@ -73,7 +74,7 @@ pytest -q
 | GET | `/api/cameras/{id}` | 设备详情含配置 | 否 |
 | GET | `/api/inventory/available` | **按日期查可用库存** | 否 |
 | GET | `/api/pricing/calculate` | 价格计算 | 否 |
-| POST | `/api/chat` | AI 对话（FAQ → 业务数据 → LLM 兜底）| 可选 |
+| POST | `/api/chat` | AI 对话（安全拦截 → 使用支持/主动导购 → FAQ → 业务数据 → LLM 兜底）| 可选 |
 | POST | `/api/reservations` | 创建预留（锁定30分钟）| 可选 |
 | POST | `/api/orders` | 创建订单 | 是 |
 | GET | `/api/orders` / `/api/orders/{id}` | 查询订单 | 是 |
@@ -81,6 +82,9 @@ pytest -q
 | DELETE | `/api/orders/{id}` | 取消（按规则算手续费）| 是 |
 | POST | `/api/orders/{id}/confirm-payment` | **人工确认收款** | staff |
 | POST | `/api/orders/{id}/advance` | 推进状态（审核/发货/签收/归还/完成）| staff |
+| GET | `/api/orders/{id}/companion` | 订单阶段、人工运单、设备指南、归还提醒 | 订单本人 |
+| POST | `/api/orders/{id}/feedback` | 完结订单评价与自愿作品分享 | 订单本人 |
+| GET | `/api/community/showcase` | 已获授权的匿名作品链接 | 否 |
 
 认证：租客使用邮箱 + 密码注册/登录，服务端写入 HttpOnly 登录 Cookie；后续浏览器请求会自动携带登录态。商家后台仍使用员工手机号 + 密码登录。
 
@@ -100,6 +104,9 @@ app/
     reservation_service.py # 预留与释放
     order_service.py       # 订单状态机/乐观锁/取消/收款
     chat_service.py        # 对话编排
+    sales_guide.py         # 主动反问、推荐、免押与下单带入
+    companion_service.py   # 租中/租后阶段与幂等提醒
+    usage_support.py       # 快速上手和安全故障排查
     session_store.py       # 会话存储（可换 Redis）
   knowledge_base/      # 52条真实客服FAQ + 本地检索 + 短回复导购兜底
   intent/              # 意图识别（LLM + 规则降级）
@@ -112,6 +119,9 @@ tests/                 # pytest
 ## 待办与依赖外部输入
 
 - **DeepSeek Key**：填入 `.env` 的 `DEEPSEEK_API_KEY` 即启用真实意图识别和知识库未命中时的导购兜底。LLM 正文最多 50 字，并自动显示“回答由AI生成”；未配置或调用失败时回复“请咨询人工”。
+- **实时物流**：当前只展示商家手工录入的承运商和运单号，不生成虚假位置或预计送达时间。接入选定的物流服务与凭证后再启用实时轨迹。
+- **提醒通道**：当前为站内事件、订单页即时补齐与 60 秒轮询；Vercel Hobby Cron 每天批处理一次。短信、邮件和微信主动通知尚未接入。
+- **异地归还**：当前提供腾讯地图搜索附近顺丰服务点的入口，不代表猫猫头自营归还网点，寄出前需与人工确认。
 - **客服口径确认**：首批 FAQ 已按业务方提供的原文纳入；其中租期、逾期费、多处损坏计算与旧 PRD/Spec 有少量冲突，正式上线前需统一口径。
 - **飞书同步**：将 `.env` 中 `FEISHU_ENABLED=true` 并填入 App ID/Secret/多维表格 token 后启用；`app/integrations/feishu.py` 的轮询回流逻辑待凭证就绪后补完。
 - **季节折扣日历**：`app/core/business_rules.py` 的 `SEASONAL_DISCOUNT` 目前仅 9 月示例，待业务方提供完整年度日历。
