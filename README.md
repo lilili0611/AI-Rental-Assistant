@@ -1,6 +1,8 @@
 # 相机租赁 AI 助手系统
 
-对接飞书数据、面向客户与内部员工的 AI 租赁管理助手。本仓库实现 **Phase 1（自助查询）+ Phase 2（订单与同步）**。
+对接飞书数据、面向客户与内部员工的 AI 租赁管理助手。本仓库实现 **Phase 1（自助查询）+ Phase 2（订单与同步）**，并加入猫猫头导购知识问答。
+
+线上地址：[https://bozipaopao.cn/](https://bozipaopao.cn/)（Vercel 托管）。
 
 > 配套文档：[PRD](files/PRD_相机租赁AI助手.md) · [Spec](files/Spec_相机租赁AI助手.md)
 
@@ -17,7 +19,8 @@
 | 数据库 | SQLite（起步，架构可平滑迁移 PostgreSQL）|
 | 数据验证 | Pydantic 2 |
 | 定时任务 | APScheduler（替代 Celery，扫描预留过期与订单超时）|
-| LLM | DeepSeek（OpenAI 兼容；未配置 Key 时自动降级到关键词规则）|
+| 知识问答 | 52 条真实客服 FAQ 本地检索，知识库优先 |
+| LLM | DeepSeek（OpenAI 兼容；仅兜底合理的未知导购问题）|
 | 飞书 | httpx 直连（Phase 2，默认关闭）|
 
 ## 已落实的 6 项关键修正（对照 Spec §10）
@@ -39,7 +42,8 @@ pip install -r requirements.txt
 
 # 2. 配置环境变量（可选，不配也能跑）
 cp .env.example .env
-#   填入 DEEPSEEK_API_KEY 即启用真实大模型意图识别；留空则用关键词规则
+#   填入 DEEPSEEK_API_KEY 即启用意图识别和未知导购问题兜底
+#   留空时 FAQ/业务查询仍可用，无法回答的问题会提示咨询人工
 
 # 3. 初始化演示数据（建表 + 真实设备目录 + 演示账号）
 python -m scripts.seed_data
@@ -59,7 +63,7 @@ source .venv/bin/activate
 pytest -q
 ```
 
-覆盖 Spec §9 关键路径：按日期库存、折扣叠加与边界、预留过期释放、订单状态机、乐观锁冲突、人工收款、预留转单不重复占用、取消释放库存、超时订单自动取消。
+覆盖 Spec §9/§13 关键路径：按日期库存、折扣叠加与边界、预留过期释放、订单状态机、乐观锁冲突、人工收款、超时订单自动取消、知识库优先、导购同义问法、LLM 50 字限制和不合理请求转人工。
 
 ## 主要 API
 
@@ -69,7 +73,7 @@ pytest -q
 | GET | `/api/cameras/{id}` | 设备详情含配置 | 否 |
 | GET | `/api/inventory/available` | **按日期查可用库存** | 否 |
 | GET | `/api/pricing/calculate` | 价格计算 | 否 |
-| POST | `/api/chat` | AI 对话（意图识别）| 可选 |
+| POST | `/api/chat` | AI 对话（FAQ → 业务数据 → LLM 兜底）| 可选 |
 | POST | `/api/reservations` | 创建预留（锁定30分钟）| 可选 |
 | POST | `/api/orders` | 创建订单 | 是 |
 | GET | `/api/orders` / `/api/orders/{id}` | 查询订单 | 是 |
@@ -97,6 +101,7 @@ app/
     order_service.py       # 订单状态机/乐观锁/取消/收款
     chat_service.py        # 对话编排
     session_store.py       # 会话存储（可换 Redis）
+  knowledge_base/      # 52条真实客服FAQ + 本地检索 + 短回复导购兜底
   intent/              # 意图识别（LLM + 规则降级）
   integrations/        # llm.py(DeepSeek) / feishu.py(飞书同步)
   core/                # business_rules.py（折扣/赔偿表）/ security.py（加密）
@@ -106,7 +111,8 @@ tests/                 # pytest
 
 ## 待办与依赖外部输入
 
-- **DeepSeek Key**：填入 `.env` 的 `DEEPSEEK_API_KEY` 即启用真实意图识别。
+- **DeepSeek Key**：填入 `.env` 的 `DEEPSEEK_API_KEY` 即启用真实意图识别和知识库未命中时的导购兜底。LLM 正文最多 50 字，并自动显示“回答由AI生成”；未配置或调用失败时回复“请咨询人工”。
+- **客服口径确认**：首批 FAQ 已按业务方提供的原文纳入；其中租期、逾期费、多处损坏计算与旧 PRD/Spec 有少量冲突，正式上线前需统一口径。
 - **飞书同步**：将 `.env` 中 `FEISHU_ENABLED=true` 并填入 App ID/Secret/多维表格 token 后启用；`app/integrations/feishu.py` 的轮询回流逻辑待凭证就绪后补完。
 - **季节折扣日历**：`app/core/business_rules.py` 的 `SEASONAL_DISCOUNT` 目前仅 9 月示例，待业务方提供完整年度日历。
 - **赔偿区间**：`business_rules.py` 已按左开右闭整理，待业务方对照实物习惯最终确认。

@@ -11,3 +11,4 @@ apscheduler
 python-dateutil
 # Postgres / Supabase 驱动 (v2.3); SQLite 仍可用于本地与测试
 psycopg[binary]>=3.1
+pytest

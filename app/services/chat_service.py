@@ -1,6 +1,6 @@
 """对话编排服务 (Spec 4.4 / 6)。
 
-流程: 识别意图 -> 按置信度阈值决策 -> 路由到查询服务 -> 生成回复。
+流程: 不合理请求检测 -> FAQ 知识库 -> 结构化业务意图 -> LLM 短回复兜底。
 Phase 1: 单轮(无 session 即新建, 不强依赖上下文)。
 Phase 2: 维护会话上下文, 合并历史实体, 多轮追踪。
 
@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.intent import recognizer
 from app.intent.recognizer import AUTH_REQUIRED, MONEY_SENSITIVE, IntentResult
+from app.knowledge_base import faq, guide
 from app.models.camera import Camera, CameraConfig
 from app.models.conversation import Conversation
 from app.services import inventory_service, pricing_service
@@ -184,42 +185,67 @@ def handle_message(
         }
 
     round_no = session["round"] + 1
-    intent = recognizer.recognize(message)
+    actions = []
+    answer_source = "business_data"
 
-    # 多轮: 合并历史已知实体(如之前提到的设备/日期)
-    if multi_turn:
-        merged = dict(session.get("context", {}))
-        merged.update({k: v for k, v in intent.entities.items() if v})
-        intent.entities = merged
-
-    # 决策: 置信度 + 金钱敏感
-    decision = _decide(intent)
-
-    if decision == "human":
-        text = "这个问题我不太确定，已为你转接人工客服，请稍候。"
+    # 1. 不合理请求优先拦截，不进入知识库或 LLM。
+    if guide.is_unreasonable(message):
+        intent = IntentResult(intent="human_handoff", confidence=1.0, source="rule")
+        text = guide.HUMAN_RESPONSE
         actions = [{"type": "handoff", "label": "转人工", "action": "human_handoff"}]
-    elif decision == "confirm":
-        text = _confirm_prompt(intent)
-        actions = [
-            {"type": "button", "label": "是的", "action": f"confirm:{intent.intent}"},
-            {"type": "button", "label": "不是", "action": "reject"},
-        ]
-    elif intent.intent in MONEY_SENSITIVE:
-        # 金钱操作即使高置信度也二次确认 (本服务不直接执行下单, 引导到订单 API)
-        text = _money_confirm_prompt(intent)
-        actions = [
-            {"type": "button", "label": "确认", "action": f"confirm:{intent.intent}"},
-            {"type": "button", "label": "取消", "action": "reject"},
-        ]
+        answer_source = "human"
     else:
-        handler = _HANDLERS.get(intent.intent)
-        if handler:
-            result = handler(db, intent.entities)
-            text = result["text"]
-            actions = result.get("actions", [])
+        # 2. 客服知识库优先，命中时原样返回，不调用 LLM 润色。
+        knowledge_match = faq.search(message)
+        if knowledge_match:
+            intent = IntentResult(
+                intent="knowledge_qa",
+                confidence=knowledge_match.score,
+                entities={"knowledge_entry_id": knowledge_match.entry.entry_id},
+                source="knowledge_base",
+            )
+            text = knowledge_match.entry.answer
+            answer_source = "knowledge_base"
         else:
-            text = "你好，我是相机租赁助手，可以帮你查设备、库存、价格和下单。"
-            actions = []
+            # 3. 设备、实时库存、价格与订单继续走结构化业务能力。
+            intent = recognizer.recognize(message)
+            if multi_turn:
+                merged = dict(session.get("context", {}))
+                merged.update({k: v for k, v in intent.entities.items() if v})
+                intent.entities = merged
+
+            decision = _decide(intent)
+            if decision == "human":
+                text, actions, answer_source = _fallback_or_handoff(
+                    message, session.get("history", [])
+                )
+            elif decision == "confirm":
+                text = _confirm_prompt(intent)
+                actions = [
+                    {"type": "button", "label": "是的", "action": f"confirm:{intent.intent}"},
+                    {"type": "button", "label": "不是", "action": "reject"},
+                ]
+            elif intent.intent in MONEY_SENSITIVE:
+                # 金钱操作即使高置信度也二次确认。
+                text = _money_confirm_prompt(intent)
+                actions = [
+                    {"type": "button", "label": "确认", "action": f"confirm:{intent.intent}"},
+                    {"type": "button", "label": "取消", "action": "reject"},
+                ]
+            else:
+                handler = _HANDLERS.get(intent.intent)
+                if _is_general_shopping_question(message, intent):
+                    text, actions, answer_source = _fallback_or_handoff(
+                        message, session.get("history", [])
+                    )
+                elif handler:
+                    result = handler(db, intent.entities)
+                    text = result["text"]
+                    actions = result.get("actions", [])
+                else:
+                    text, actions, answer_source = _fallback_or_handoff(
+                        message, session.get("history", [])
+                    )
 
     # 更新会话
     session["round"] = round_no
@@ -239,9 +265,31 @@ def handle_message(
         "detected_intent": intent.intent,
         "confidence": round(intent.confidence, 3),
         "ai_response": text,
+        "answer_source": answer_source,
         "next_actions": actions,
         "requires_auth": intent.intent in AUTH_REQUIRED,
     }
+
+
+def _fallback_or_handoff(message: str, history: list[dict]) -> tuple[str, list[dict], str]:
+    body = guide.generate_answer(message, history)
+    if body:
+        return guide.mark_ai_generated(body), [], "llm"
+    return (
+        guide.HUMAN_RESPONSE,
+        [{"type": "handoff", "label": "转人工", "action": "human_handoff"}],
+        "human",
+    )
+
+
+def _is_general_shopping_question(message: str, intent: IntentResult) -> bool:
+    """无明确在售型号的场景选购问题，应交给导购而不是列出全部设备。"""
+    if intent.intent not in {"device_query", "device_compare"}:
+        return False
+    if intent.entities.get("devices"):
+        return False
+    shopping_cues = ("怎么选", "推荐", "适合", "哪个好", "拍摄", "拍", "场景", "搭配", "新手")
+    return any(cue in message for cue in shopping_cues)
 
 
 def _decide(intent: IntentResult) -> str:

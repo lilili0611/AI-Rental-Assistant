@@ -70,7 +70,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="相机租赁 AI 助手",
     version=__version__,
-    description="对接飞书数据、面向客户与内部员工的 AI 租赁管理助手 (Phase 1 + 2)",
+    description="相机租赁与猫猫头导购助手（FAQ 优先，LLM 安全兜底）",
     lifespan=lifespan,
 )
 
