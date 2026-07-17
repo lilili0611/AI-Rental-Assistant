@@ -2,7 +2,7 @@
 
 对接飞书数据、面向客户与内部员工的 AI 租赁管理助手。当前 **v2.8** 已实现猫猫头主动导购与租前、租中、租后全流程陪伴。
 
-线上地址：[https://bozipaopao.cn/](https://bozipaopao.cn/)（Vercel 托管）。
+线上地址：[https://bozipaopao.cn/](https://bozipaopao.cn/)（Vercel 托管，v2.8 已于 2026-07-17 发布）。
 
 > 配套文档：[PRD](files/PRD_相机租赁AI助手.md) · [Spec](files/Spec_相机租赁AI助手.md)
 
