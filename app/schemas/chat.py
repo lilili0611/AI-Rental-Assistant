@@ -24,6 +24,8 @@ class ChatResponse(BaseModel):
     detected_intent: str
     confidence: float
     ai_response: str
-    answer_source: Literal["knowledge_base", "business_data", "workflow", "llm", "human"] = "business_data"
+    answer_source: Literal[
+        "knowledge_base", "business_data", "workflow", "llm", "customer_service"
+    ] = "business_data"
     next_actions: List[ChatAction] = Field(default_factory=list)
     requires_auth: bool = False

@@ -13,9 +13,9 @@ _DANGER_CUES = ("进水", "泡水", "摔了", "摔坏", "冒烟", "异味", "烫
 def answer(message: str) -> Optional[dict]:
     if any(cue in message for cue in _DANGER_CUES):
         return {
-            "text": "请立即关机、断开电源并停止使用，请咨询人工。不要充电、开机或自行拆机。",
-            "human": True,
-            "actions": [{"type": "handoff", "label": "转人工", "action": "human_handoff"}],
+            "text": "请立即关机、断开电源并停止使用，请咨询客服。不要充电、开机或自行拆机。",
+            "customer_service": True,
+            "actions": [],
         }
 
     entities = extract_entities(message)
@@ -38,30 +38,30 @@ def answer(message: str) -> Optional[dict]:
                     "payload": {"url": profile["guide_url"]},
                 }
             )
-        return {"text": text, "human": False, "actions": actions}
+        return {"text": text, "customer_service": False, "actions": actions}
 
     if any(cue in message for cue in ("开不了机", "无法开机", "不能开机", "没反应")):
         return {
-            "text": "先关机，重新装入已充电电池并确认电池仓锁紧；仍无反应请停止尝试并咨询人工。",
-            "human": False,
+            "text": "先关机，重新装入已充电电池并确认电池仓锁紧；仍无反应请停止尝试并咨询客服。",
+            "customer_service": False,
             "actions": [],
         }
     if any(cue in message for cue in ("无法对焦", "对不上焦", "对焦失败", "拍糊了")):
         return {
-            "text": "确认镜头在AF档，擦净镜头表面，增加环境光并重新半按快门；仍失败请咨询人工。",
-            "human": False,
+            "text": "确认镜头在AF档，擦净镜头表面，增加环境光并重新半按快门；仍失败请咨询客服。",
+            "customer_service": False,
             "actions": [],
         }
     if any(cue in message for cue in ("存储卡错误", "读不到卡", "内存卡错误", "无法保存")):
         return {
-            "text": "关机后重新插卡；若卡内有照片先备份，不要直接格式化。换卡仍报错请咨询人工。",
-            "human": False,
+            "text": "关机后重新插卡；若卡内有照片先备份，不要直接格式化。换卡仍报错请咨询客服。",
+            "customer_service": False,
             "actions": [],
         }
     if any(cue in message for cue in ("电池充不进", "充不了电", "电量掉得快")):
         return {
-            "text": "检查充电器、插座和电池触点是否干燥清洁，换插座复测；异常发热请停用并咨询人工。",
-            "human": False,
+            "text": "检查充电器、插座和电池触点是否干燥清洁，换插座复测；异常发热请停用并咨询客服。",
+            "customer_service": False,
             "actions": [],
         }
     return None

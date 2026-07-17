@@ -618,7 +618,7 @@ def cancel_order(
     _check_version(order, version)
     if order.status not in ALLOWED_TRANSITIONS or "cancelled" not in ALLOWED_TRANSITIONS[order.status]:
         raise OrderError(
-            f"当前状态 {order.status} 不可取消(已发货需走拒收/人工)",
+            f"当前状态 {order.status} 不可取消（已发货请联系客服处理拒收）",
             code="cannot_cancel",
         )
 

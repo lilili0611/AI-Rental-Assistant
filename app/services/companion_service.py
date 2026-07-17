@@ -151,7 +151,7 @@ def build_companion(db: Session, order: Order, today: Optional[date] = None) -> 
     phase = derive_phase(order, today)
     days_until_return = (order.rental_end - today).days
     if days_until_return < 0:
-        return_message = f"已超过归还日 {abs(days_until_return)} 天，请尽快咨询人工处理归还。"
+        return_message = f"已超过归还日 {abs(days_until_return)} 天，请尽快咨询客服处理归还。"
     elif days_until_return == 0:
         return_message = "今天到期，请核对相机、镜头、电池、充电器和存储卡后寄回。"
     else:
@@ -186,7 +186,7 @@ def build_companion(db: Session, order: Order, today: Optional[date] = None) -> 
             "message": return_message,
             "packing_tip": "使用原防震包和纸箱，配件齐全寄回；寄出前备份照片并格式化租用的存储卡。",
             "outlet_query_url": f"https://map.qq.com/?keyword={outlet_keyword}",
-            "outlet_notice": "这是腾讯地图搜索入口，并非猫猫头自营网点；寄出前请与人工确认承运方式。",
+            "outlet_notice": "这是腾讯地图搜索入口，并非猫猫头自营网点；寄出前请与客服确认承运方式。",
         },
         "events": [
             {

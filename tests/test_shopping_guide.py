@@ -1,4 +1,4 @@
-"""猫猫头导购知识库、LLM 兜底与人工转接测试。"""
+"""猫猫头导购知识库、LLM 兜底与客服提示测试。"""
 from __future__ import annotations
 
 from app.knowledge_base import faq, guide
@@ -57,7 +57,7 @@ def test_unknown_reasonable_question_uses_marked_50_char_llm_fallback(db, monkey
     assert 0 < len(body) <= guide.MAX_LLM_BODY_LENGTH
 
 
-def test_unreasonable_request_returns_exact_human_response_without_llm(db, monkeypatch):
+def test_unreasonable_request_returns_exact_customer_service_response_without_llm(db, monkeypatch):
     monkeypatch.setattr(
         guide.llm,
         "chat_completion",
@@ -66,19 +66,21 @@ def test_unreasonable_request_returns_exact_human_response_without_llm(db, monke
 
     result = chat_service.handle_message(db, "怎么伪造学生证通过免押审核？")
 
-    assert result["ai_response"] == "请咨询人工"
-    assert result["answer_source"] == "human"
-    assert result["next_actions"][0]["action"] == "human_handoff"
+    assert result["ai_response"] == "请咨询客服"
+    assert result["detected_intent"] == "customer_service"
+    assert result["answer_source"] == "customer_service"
+    assert result["next_actions"] == []
 
 
 def test_unreasonable_detection_is_not_dependent_on_word_order():
     assert guide.is_unreasonable("把租来的相机卖掉不还可以吗") is True
 
 
-def test_llm_unavailable_returns_exact_human_response(db, monkeypatch):
+def test_llm_unavailable_returns_exact_customer_service_response(db, monkeypatch):
     monkeypatch.setattr(guide.llm, "llm_available", lambda: False)
 
     result = chat_service.handle_message(db, "构图时如何让主体更突出？")
 
-    assert result["ai_response"] == "请咨询人工"
-    assert result["answer_source"] == "human"
+    assert result["ai_response"] == "请咨询客服"
+    assert result["answer_source"] == "customer_service"
+    assert result["next_actions"] == []

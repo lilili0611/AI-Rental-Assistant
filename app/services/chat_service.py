@@ -7,7 +7,7 @@ Phase 2: 维护会话上下文, 合并历史实体, 多轮追踪。
 置信度阈值 (Spec 6.2):
   > 0.8: 直接执行
   0.6 - 0.8: 请求用户确认
-  < 0.6: 转人工
+  < 0.6: 提示咨询客服
 涉及金钱的意图(下单/改单/取消)即使高置信度也需二次确认。
 """
 from __future__ import annotations
@@ -25,7 +25,7 @@ from app.intent.recognizer import AUTH_REQUIRED, MONEY_SENSITIVE, IntentResult
 from app.knowledge_base import faq, guide
 from app.models.camera import Camera, CameraConfig
 from app.models.conversation import Conversation
-from app.services import inventory_service, pricing_service, sales_guide, usage_support
+from app.services import damage_support, inventory_service, pricing_service, sales_guide, usage_support
 from app.services.session_store import get_session_store
 
 
@@ -227,93 +227,112 @@ def handle_message(
     actions = []
     answer_source = "business_data"
 
-    # 1. 不合理请求优先拦截，不进入知识库或 LLM。
+    # 1. 不合理请求优先拦截，不进入知识库或 LLM，也不提供转接动作。
     if guide.is_unreasonable(message):
-        intent = IntentResult(intent="human_handoff", confidence=1.0, source="rule")
-        text = guide.HUMAN_RESPONSE
-        actions = [{"type": "handoff", "label": "转人工", "action": "human_handoff"}]
-        answer_source = "human"
+        intent = IntentResult(intent="customer_service", confidence=1.0, source="rule")
+        text = guide.CUSTOMER_SERVICE_RESPONSE
+        actions = []
+        answer_source = "customer_service"
     else:
-        # 2. 设备操作与简单故障排查；危险情况直接转人工。
-        support = usage_support.answer(message)
-        if support:
+        # 2. 损坏与赔付问题优先展示业务方标准图，不由 AI 自动定损。
+        damage = damage_support.answer(message)
+        if damage:
             intent = IntentResult(
-                intent="usage_support",
+                intent="damage_policy",
                 confidence=0.95,
                 entities={},
                 source="knowledge_base",
             )
-            text = support["text"]
-            actions = support.get("actions", [])
-            answer_source = "human" if support.get("human") else "knowledge_base"
+            text = damage["text"]
+            actions = damage.get("actions", [])
+            answer_source = "knowledge_base"
         else:
-            # 3. 主动导购流程优先处理“推荐/怎么选”等需求，每轮只反问一个关键信息。
-            guided = sales_guide.process(db, message, session.setdefault("sales_journey", {}))
-        if not support and guided:
-            session["sales_journey"] = guided["journey"]
-            intent = IntentResult(
-                intent="guided_sales",
-                confidence=0.95,
-                entities={"sales_journey": guided["journey"]},
-                source="workflow",
-            )
-            text = guided["text"]
-            actions = guided.get("actions", [])
-            answer_source = "workflow"
-        elif not support:
-            # 4. 客服知识库优先，命中时原样返回，不调用 LLM 润色。
-            knowledge_match = faq.search(message)
-            if knowledge_match:
+            # 3. 设备操作与简单故障排查；危险情况提示停用并咨询客服。
+            support = usage_support.answer(message)
+            if support:
                 intent = IntentResult(
-                    intent="knowledge_qa",
-                    confidence=knowledge_match.score,
-                    entities={"knowledge_entry_id": knowledge_match.entry.entry_id},
+                    intent="usage_support",
+                    confidence=0.95,
+                    entities={},
                     source="knowledge_base",
                 )
-                text = knowledge_match.entry.answer
-                answer_source = "knowledge_base"
+                text = support["text"]
+                actions = support.get("actions", [])
+                answer_source = (
+                    "customer_service"
+                    if support.get("customer_service")
+                    else "knowledge_base"
+                )
             else:
-                # 5. 设备、实时库存、价格与订单继续走结构化业务能力。
-                intent = recognizer.recognize(message)
-                if multi_turn:
-                    merged = {
-                        k: v for k, v in session.get("context", {}).items()
-                        if k != "sales_journey"
-                    }
-                    merged.update({k: v for k, v in intent.entities.items() if v})
-                    intent.entities = merged
-
-                decision = _decide(intent)
-                if decision == "human":
-                    text, actions, answer_source = _fallback_or_handoff(
-                        message, session.get("history", [])
+                # 4. 主动导购流程优先处理“推荐/怎么选”等需求，每轮只反问一个信息。
+                guided = sales_guide.process(
+                    db, message, session.setdefault("sales_journey", {})
+                )
+                if guided:
+                    session["sales_journey"] = guided["journey"]
+                    intent = IntentResult(
+                        intent="guided_sales",
+                        confidence=0.95,
+                        entities={"sales_journey": guided["journey"]},
+                        source="workflow",
                     )
-                elif decision == "confirm":
-                    text = _confirm_prompt(intent)
-                    actions = [
-                        {"type": "button", "label": "是的", "action": f"confirm:{intent.intent}"},
-                        {"type": "button", "label": "不是", "action": "reject"},
-                    ]
-                elif intent.intent in MONEY_SENSITIVE:
-                    text = _money_confirm_prompt(intent)
-                    actions = [
-                        {"type": "button", "label": "确认", "action": f"confirm:{intent.intent}"},
-                        {"type": "button", "label": "取消", "action": "reject"},
-                    ]
+                    text = guided["text"]
+                    actions = guided.get("actions", [])
+                    answer_source = "workflow"
                 else:
-                    handler = _HANDLERS.get(intent.intent)
-                    if _is_general_shopping_question(message, intent):
-                        text, actions, answer_source = _fallback_or_handoff(
-                            message, session.get("history", [])
+                    # 5. 客服知识库优先，命中时原样返回，不调用 LLM 润色。
+                    knowledge_match = faq.search(message)
+                    if knowledge_match:
+                        intent = IntentResult(
+                            intent="knowledge_qa",
+                            confidence=knowledge_match.score,
+                            entities={"knowledge_entry_id": knowledge_match.entry.entry_id},
+                            source="knowledge_base",
                         )
-                    elif handler:
-                        result = handler(db, intent.entities)
-                        text = result["text"]
-                        actions = result.get("actions", [])
+                        text = knowledge_match.entry.answer
+                        answer_source = "knowledge_base"
                     else:
-                        text, actions, answer_source = _fallback_or_handoff(
-                            message, session.get("history", [])
-                        )
+                        # 6. 设备、实时库存、价格与订单继续走结构化业务能力。
+                        intent = recognizer.recognize(message)
+                        if multi_turn:
+                            merged = {
+                                k: v for k, v in session.get("context", {}).items()
+                                if k != "sales_journey"
+                            }
+                            merged.update({k: v for k, v in intent.entities.items() if v})
+                            intent.entities = merged
+
+                        decision = _decide(intent)
+                        if decision == "customer_service":
+                            text, actions, answer_source = _fallback_or_customer_service(
+                                message, session.get("history", [])
+                            )
+                        elif decision == "confirm":
+                            text = _confirm_prompt(intent)
+                            actions = [
+                                {"type": "button", "label": "是的", "action": f"confirm:{intent.intent}"},
+                                {"type": "button", "label": "不是", "action": "reject"},
+                            ]
+                        elif intent.intent in MONEY_SENSITIVE:
+                            text = _money_confirm_prompt(intent)
+                            actions = [
+                                {"type": "button", "label": "确认", "action": f"confirm:{intent.intent}"},
+                                {"type": "button", "label": "取消", "action": "reject"},
+                            ]
+                        else:
+                            handler = _HANDLERS.get(intent.intent)
+                            if _is_general_shopping_question(message, intent):
+                                text, actions, answer_source = _fallback_or_customer_service(
+                                    message, session.get("history", [])
+                                )
+                            elif handler:
+                                result = handler(db, intent.entities)
+                                text = result["text"]
+                                actions = result.get("actions", [])
+                            else:
+                                text, actions, answer_source = _fallback_or_customer_service(
+                                    message, session.get("history", [])
+                                )
 
     # 更新会话
     session["round"] = round_no
@@ -339,14 +358,16 @@ def handle_message(
     }
 
 
-def _fallback_or_handoff(message: str, history: list[dict]) -> tuple[str, list[dict], str]:
+def _fallback_or_customer_service(
+    message: str, history: list[dict]
+) -> tuple[str, list[dict], str]:
     body = guide.generate_answer(message, history)
     if body:
         return guide.mark_ai_generated(body), [], "llm"
     return (
-        guide.HUMAN_RESPONSE,
-        [{"type": "handoff", "label": "转人工", "action": "human_handoff"}],
-        "human",
+        guide.CUSTOMER_SERVICE_RESPONSE,
+        [],
+        "customer_service",
     )
 
 
@@ -362,7 +383,7 @@ def _is_general_shopping_question(message: str, intent: IntentResult) -> bool:
 
 def _decide(intent: IntentResult) -> str:
     if intent.intent == "unknown" or intent.confidence < 0.6:
-        return "human"
+        return "customer_service"
     if intent.confidence < 0.8:
         return "confirm"
     return "execute"

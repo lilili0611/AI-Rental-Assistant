@@ -15,8 +15,9 @@ def test_basic_failure_is_safe_and_non_destructive():
     assert "不要直接格式化" in result["text"]
 
 
-def test_dangerous_failure_stops_use_and_hands_off():
+def test_dangerous_failure_stops_use_and_points_to_customer_service():
     result = usage_support.answer("相机进水了还能开机吗？")
-    assert result["human"] is True
+    assert result["customer_service"] is True
     assert "停止使用" in result["text"]
-    assert result["actions"][0]["action"] == "human_handoff"
+    assert "请咨询客服" in result["text"]
+    assert result["actions"] == []

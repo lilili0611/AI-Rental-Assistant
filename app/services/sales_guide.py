@@ -237,7 +237,7 @@ def process(db: Session, message: str, journey: dict) -> Optional[dict]:
     rows = _configs_for_journey(db, journey)
     if not rows:
         journey["active"] = False
-        return {"text": "目前没有可推荐的在售配置，请咨询人工。", "actions": [], "journey": journey}
+        return {"text": "目前没有可推荐的在售配置，请咨询客服。", "actions": [], "journey": journey}
     selected_index = int(journey.get("selected_index", 0)) % len(rows)
     selected_config, selected_camera = rows[selected_index]
     journey["camera_id"] = selected_camera.id

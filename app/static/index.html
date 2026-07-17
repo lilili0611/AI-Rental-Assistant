@@ -357,7 +357,8 @@ async function onAct(a){
     await selCam(p.camera_id);$('cfg').value=p.config_id;$('start').value=p.start_date;$('end').value=p.end_date;$('qty').value=p.quantity||1;
     $('cfgCard').scrollIntoView({behavior:'smooth',block:'start'});await checkQuote();toast('已带入设备和租期，请核对后点击立即下单');
   }else if(a.action==='open_url'){
-    const url=(a.payload||{}).url||'';if(/^https:\/\//.test(url))window.open(url,'_blank','noopener');
+    const url=(a.payload||{}).url||'';
+    if(/^https:\/\//.test(url)||/^\/static\/[A-Za-z0-9._/-]+$/.test(url))window.open(url,'_blank','noopener');
   }else if(a.action==='order_create')toast('请在左侧选择配置和日期，点“立即下单”');
   else if(a.action.startsWith('confirm:'))send('确认');else send(a.label);
 }
