@@ -421,8 +421,12 @@ function addBub(role,text,intent,acts){
 async function onAct(a){
   if(a.action==='prefill_order'){
     const p=a.payload||{};if(!p.camera_id||!p.config_id)return toast('下单信息不完整，请重新咨询');
+    const shipping=p.shipping_address||{};SHIPPING_DRAFT={};
+    ['receiver_name','phone','province','city','district','detail_address'].forEach(key=>{if(typeof shipping[key]==='string'&&shipping[key].trim())SHIPPING_DRAFT[key]=shipping[key].trim();});
     await selCam(p.camera_id);$('cfg').value=p.config_id;$('start').value=p.start_date;$('end').value=p.end_date;$('qty').value=p.quantity||1;
-    $('cfgCard').scrollIntoView({behavior:'smooth',block:'start'});await checkQuote();toast('已带入设备和租期，请填写收货地址后确认下单');
+    await checkQuote();$('cfgCard').scrollIntoView({behavior:'smooth',block:'start'});
+    const complete=['receiver_name','phone','province','city','district','detail_address'].every(key=>SHIPPING_DRAFT[key]);
+    toast(complete?'设备、租期和收货信息已带入，请核对后下单':'设备和租期已带入，请在下单页补全收货信息');
   }else if(a.action==='open_url'){
     const url=(a.payload||{}).url||'';
     if(/^https:\/\//.test(url)||/^\/static\/[A-Za-z0-9._/-]+$/.test(url))window.open(url,'_blank','noopener');

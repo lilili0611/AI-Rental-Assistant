@@ -1,6 +1,7 @@
 """猫猫头多轮导购：反问补齐需求、推荐真实配置并带入下单页。"""
 from __future__ import annotations
 
+import re
 from datetime import date
 from typing import Optional
 
@@ -17,6 +18,7 @@ from app.services.device_guides import profile_for
 _START_CUES = (
     "推荐", "怎么选", "哪个好", "对比", "比较", "适合", "想租相机", "租相机", "想租", "帮我选",
     "拍人像", "拍视频", "拍照", "旅游", "旅行", "演唱会", "年会", "宠物",
+    "我要租", "就租", "确定租", "选好了", "租这个", "下单",
 )
 
 _CONTINUE_DATES = "继续填写租期"
@@ -59,10 +61,110 @@ _SCENE_CAMERA_IDS = {
     "daily": ["G7X2", "U400", "IXUS110", "U1"],
 }
 
+_PHONE_RE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
+_NAME_RE = re.compile(
+    r"(?:收货人(?:姓名)?|姓名|联系人)\s*[:：]?\s*"
+    r"(?P<name>[\u4e00-\u9fff·]{2,20}?)"
+    r"(?=\s*(?:[,，;；]|电话|手机|收货地址|详细地址|地址|$))"
+)
+_ADDRESS_RE = re.compile(r"(?:收货地址|详细地址|地址)\s*[:：]?\s*(?P<address>.+)$")
+_STANDARD_ADDRESS_RE = re.compile(
+    r"^(?P<province>[\u4e00-\u9fff]{2,12}?(?:省|自治区))"
+    r"(?P<city>[\u4e00-\u9fff]{2,12}?(?:市|自治州|地区|盟))"
+    r"(?P<district>[\u4e00-\u9fff]{2,12}?(?:区|县|旗|市))"
+    r"(?P<detail>.+)$"
+)
+_MUNICIPALITY_ADDRESS_RE = re.compile(
+    r"^(?P<municipality>北京市|上海市|天津市|重庆市)"
+    r"(?P<district>[\u4e00-\u9fff]{2,12}?(?:区|县))"
+    r"(?P<detail>.+)$"
+)
+_LABELED_COMPONENTS = {
+    "province": re.compile(r"(?:省份|省)\s*[:：]\s*([^,，;；\s]+)"),
+    "city": re.compile(r"(?:城市|市)\s*[:：]\s*([^,，;；\s]+)"),
+    "district": re.compile(r"(?:区县|区/县|区|县)\s*[:：]\s*([^,，;；\s]+)"),
+    "detail_address": re.compile(r"详细地址\s*[:：]\s*([^,，;；]+)"),
+}
+_SHIPPING_KEYS = (
+    "receiver_name", "phone", "province", "city", "district", "detail_address",
+)
+
 
 def should_start(message: str) -> bool:
     lower = message.lower()
-    return any(cue in lower for cue in _START_CUES)
+    if any(cue in lower for cue in _START_CUES):
+        return True
+    entities = recognizer.extract_entities(message)
+    return bool(
+        entities.get("devices")
+        and entities.get("start_date")
+        and entities.get("end_date")
+    )
+
+
+def _split_full_address(raw: str) -> dict:
+    compact = re.sub(r"\s+", "", raw.strip(" ，,；;。"))
+    municipality = _MUNICIPALITY_ADDRESS_RE.match(compact)
+    if municipality:
+        city = municipality.group("municipality")
+        return {
+            "province": city,
+            "city": city,
+            "district": municipality.group("district"),
+            "detail_address": municipality.group("detail"),
+        }
+    standard = _STANDARD_ADDRESS_RE.match(compact)
+    if standard:
+        return {
+            "province": standard.group("province"),
+            "city": standard.group("city"),
+            "district": standard.group("district"),
+            "detail_address": standard.group("detail"),
+        }
+    return {}
+
+
+def extract_shipping_fields(message: str) -> dict:
+    """只提取有明确标签/格式的收货字段，不调用 LLM 或猜测缺失内容。"""
+    fields: dict = {}
+    name = _NAME_RE.search(message)
+    phone = _PHONE_RE.search(message)
+    if name:
+        fields["receiver_name"] = name.group("name").strip()
+    if phone:
+        fields["phone"] = phone.group(0)
+
+    for key, pattern in _LABELED_COMPONENTS.items():
+        match = pattern.search(message)
+        if match:
+            fields[key] = match.group(1).strip()
+
+    address = _ADDRESS_RE.search(message)
+    if address:
+        raw = re.split(
+            r"(?:[,，;；]\s*)?(?:收货人(?:姓名)?|姓名|联系人|电话|手机)\s*[:：]?",
+            address.group("address"),
+            maxsplit=1,
+        )[0]
+        fields.update(_split_full_address(raw))
+    return {key: value for key, value in fields.items() if value}
+
+
+def _shipping_is_complete(shipping: dict) -> bool:
+    if not all(shipping.get(key) for key in _SHIPPING_KEYS):
+        return False
+    return bool(
+        2 <= len(shipping["receiver_name"]) <= 100
+        and _PHONE_RE.fullmatch(shipping["phone"])
+        and all(2 <= len(shipping[key]) <= 50 for key in ("province", "city", "district"))
+        and 5 <= len(shipping["detail_address"]) <= 200
+    )
+
+
+def redact_shipping_message(message: str) -> str:
+    if not extract_shipping_fields(message):
+        return message
+    return "[本轮包含客户收货信息，原文已脱敏；结构化草稿仅用于下单预填]"
 
 
 def _awaiting_dates(journey: dict) -> bool:
@@ -190,17 +292,20 @@ def _comparison(rows: list[tuple[CameraConfig, Camera]]) -> str:
 
 
 def _prefill_action(journey: dict) -> dict:
+    payload = {
+        "camera_id": journey["camera_id"],
+        "config_id": journey["config_id"],
+        "start_date": journey["start_date"],
+        "end_date": journey["end_date"],
+        "quantity": journey.get("quantity", 1),
+    }
+    if journey.get("shipping_address"):
+        payload["shipping_address"] = dict(journey["shipping_address"])
     return {
         "type": "button",
         "label": "带入下单页",
         "action": "prefill_order",
-        "payload": {
-            "camera_id": journey["camera_id"],
-            "config_id": journey["config_id"],
-            "start_date": journey["start_date"],
-            "end_date": journey["end_date"],
-            "quantity": journey.get("quantity", 1),
-        },
+        "payload": payload,
     }
 
 
@@ -232,6 +337,11 @@ def process(db: Session, message: str, journey: dict) -> Optional[dict]:
     priority = _extract_priority(message)
     deposit_choice = _extract_deposit_choice(message)
     entities = recognizer.extract_entities(message)
+    shipping_fields = extract_shipping_fields(message)
+    if shipping_fields:
+        shipping = dict(journey.get("shipping_address", {}))
+        shipping.update(shipping_fields)
+        journey["shipping_address"] = shipping
     if any(entities.get(key) for key in ("start_date", "end_date", "days")):
         journey.pop("paused", None)
     if scene:
@@ -248,7 +358,15 @@ def process(db: Session, message: str, journey: dict) -> Optional[dict]:
         if entities.get(key):
             journey[key] = entities[key]
 
-    if not journey.get("scene") and len(journey.get("requested_devices", [])) >= 2 and not journey.get("compared"):
+    if (
+        journey.get("requested_devices")
+        and journey.get("start_date")
+        and journey.get("end_date")
+    ):
+        journey["device_confirmed"] = True
+
+    direct_order = bool(journey.get("device_confirmed"))
+    if not direct_order and not journey.get("scene") and len(journey.get("requested_devices", [])) >= 2 and not journey.get("compared"):
         compare_rows = _configs_for_journey(db, journey)
         journey["compared"] = True
         return {
@@ -256,7 +374,7 @@ def process(db: Session, message: str, journey: dict) -> Optional[dict]:
             "actions": [],
             "journey": journey,
         }
-    if not journey.get("scene"):
+    if not direct_order and not journey.get("scene"):
         return {
             "text": "先告诉我主要拍什么：旅行风景、人像、演唱会、Vlog、活动还是日常记录？",
             "actions": [
@@ -265,7 +383,7 @@ def process(db: Session, message: str, journey: dict) -> Optional[dict]:
             ],
             "journey": journey,
         }
-    if not journey.get("experience"):
+    if not direct_order and not journey.get("experience"):
         return {
             "text": f"明白，主要拍{_SCENE_LABELS[journey['scene']]}。你是第一次用相机，还是已有基础？",
             "actions": [
@@ -274,7 +392,7 @@ def process(db: Session, message: str, journey: dict) -> Optional[dict]:
             ],
             "journey": journey,
         }
-    if not journey.get("priority"):
+    if not direct_order and not journey.get("priority"):
         return {
             "text": "选设备时你更看重省钱、轻便均衡，还是画质优先？",
             "actions": [
@@ -295,7 +413,9 @@ def process(db: Session, message: str, journey: dict) -> Optional[dict]:
     journey["config_id"] = selected_config.id
     journey["recommendation_ids"] = [config.id for config, _ in rows]
 
-    if not journey.get("recommended"):
+    if not journey.get("recommended") and direct_order:
+        journey["recommended"] = True
+    elif not journey.get("recommended"):
         journey["recommended"] = True
         return {
             "text": (
@@ -356,9 +476,16 @@ def process(db: Session, message: str, journey: dict) -> Optional[dict]:
         prefix = f"可以，免押说明如下：\n{_faq_answer('1')}\n"
     else:
         prefix = "好的，按普通押金方式继续。\n"
+    shipping = journey.get("shipping_address", {})
+    if _shipping_is_complete(shipping):
+        shipping_note = "已识别完整收货信息，点击后会自动带入下单页。"
+    elif shipping:
+        shipping_note = "已识别的收货信息会自动带入；缺少的内容请在下单页自行补全。"
+    else:
+        shipping_note = "你还没有提供收货信息，请在下单页自行填写。"
     journey["active"] = False
     return {
-        "text": prefix + "设备、租期和数量已经整理好，点击“带入下单页”核对库存与价格，填写收货人、手机号和完整地址，再由你确认下单。",
+        "text": prefix + "设备、租期和数量已经整理好，点击“带入下单页”即可自动选择产品和日期。" + shipping_note,
         "actions": [_prefill_action(journey)],
         "journey": journey,
     }

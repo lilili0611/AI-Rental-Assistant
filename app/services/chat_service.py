@@ -230,6 +230,7 @@ def handle_message(
     else:
         session = store.get(session_id) or _restore_session(db, session_id, user_id)
 
+    safe_message = sales_guide.redact_shipping_message(message)
     round_no = session["round"] + 1
     actions = []
     answer_source = "business_data"
@@ -323,7 +324,7 @@ def handle_message(
                     # 7. 等待租期时的新问题暂停导购，直接进入 LLM 安全兜底。
                     if side_question:
                         text, actions, answer_source = _fallback_or_customer_service(
-                            message, session.get("history", []), side_question=True
+                            safe_message, session.get("history", []), side_question=True
                         )
                         intent = IntentResult(
                             intent="guided_sales_side_question",
@@ -347,7 +348,7 @@ def handle_message(
                         answer_source = "workflow"
                     elif not side_question:
                         # 9. 设备、实时库存、价格与订单继续走结构化业务能力。
-                        intent = recognizer.recognize(message)
+                        intent = recognizer.recognize(safe_message)
                         if multi_turn:
                             merged = {
                                 k: v for k, v in session.get("context", {}).items()
@@ -359,7 +360,7 @@ def handle_message(
                         decision = _decide(intent)
                         if decision == "customer_service":
                             text, actions, answer_source = _fallback_or_customer_service(
-                                message, session.get("history", [])
+                                safe_message, session.get("history", [])
                             )
                         elif decision == "confirm":
                             text = _confirm_prompt(intent)
@@ -377,7 +378,7 @@ def handle_message(
                             handler = _HANDLERS.get(intent.intent)
                             if _is_general_shopping_question(message, intent):
                                 text, actions, answer_source = _fallback_or_customer_service(
-                                    message, session.get("history", [])
+                                    safe_message, session.get("history", [])
                                 )
                             elif handler:
                                 result = handler(db, intent.entities)
@@ -385,7 +386,7 @@ def handle_message(
                                 actions = result.get("actions", [])
                             else:
                                 text, actions, answer_source = _fallback_or_customer_service(
-                                    message, session.get("history", [])
+                                    safe_message, session.get("history", [])
                                 )
 
     # 发散问题回答后暂停但保留导购草稿，并提供恢复/重选动作。
@@ -396,7 +397,7 @@ def handle_message(
 
     # 更新会话
     session["round"] = round_no
-    session["history"].append({"role": "user", "content": message})
+    session["history"].append({"role": "user", "content": safe_message})
     session["history"].append({"role": "assistant", "content": text})
     session["context"] = intent.entities
     session["intents"].append(intent.intent)
@@ -404,7 +405,7 @@ def handle_message(
         session["user_id"] = user_id
     store.save(session_id, session)
 
-    _persist(db, session_id, user_id, round_no, message, text, intent)
+    _persist(db, session_id, user_id, round_no, safe_message, text, intent)
 
     return {
         "session_id": session_id,

@@ -4,9 +4,11 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 import pytest
+from sqlalchemy import select
 
 from app.knowledge_base import guide
-from app.services import chat_service
+from app.models.conversation import Conversation
+from app.services import chat_service, sales_guide
 from app.services.session_store import get_session_store
 
 
@@ -47,13 +49,139 @@ def test_guided_sales_reaches_deposit_and_prefill(db, seeded, monkeypatch):
 
     final = chat_service.handle_message(db, "需要免押", session_id=sid)
     assert "免押方式（3选1）" in final["ai_response"]
-    assert "完整地址" in final["ai_response"]
+    assert "下单页自行填写" in final["ai_response"]
     assert final["answer_source"] == "workflow"
     assert final["next_actions"][0]["action"] == "prefill_order"
     payload = final["next_actions"][0]["payload"]
     assert payload["config_id"] == seeded["config"].id
     assert payload["start_date"] == start.isoformat()
     assert payload["end_date"] == end.isoformat()
+
+
+def test_shipping_fields_extract_labeled_full_and_municipality_addresses():
+    normal = sales_guide.extract_shipping_fields(
+        "姓名：张三，电话：13800138000，地址：江西省南昌市西湖区丁公路北88号2栋301"
+    )
+    assert normal == {
+        "receiver_name": "张三",
+        "phone": "13800138000",
+        "province": "江西省",
+        "city": "南昌市",
+        "district": "西湖区",
+        "detail_address": "丁公路北88号2栋301",
+    }
+
+    municipality = sales_guide.extract_shipping_fields(
+        "收货地址：北京市朝阳区望京街道88号3栋201"
+    )
+    assert municipality["province"] == "北京市"
+    assert municipality["city"] == "北京市"
+    assert municipality["district"] == "朝阳区"
+
+
+def test_confirmed_device_and_dates_go_directly_to_deposit_then_prefill(
+    db, seeded, monkeypatch
+):
+    monkeypatch.setattr(guide.llm, "llm_available", lambda: False)
+    start = date.today() + timedelta(days=20)
+    end = start + timedelta(days=2)
+
+    first = chat_service.handle_message(
+        db, f"我要租R5，{start.isoformat()}到{end.isoformat()}"
+    )
+
+    assert first["detected_intent"] == "guided_sales"
+    assert "是否需要申请免押" in first["ai_response"]
+    assert "主要拍什么" not in first["ai_response"]
+
+    final = chat_service.handle_message(
+        db, "不需要免押", session_id=first["session_id"]
+    )
+    payload = final["next_actions"][0]["payload"]
+    assert payload["camera_id"] == seeded["camera"].id
+    assert payload["config_id"] == seeded["config"].id
+    assert payload["start_date"] == start.isoformat()
+    assert payload["end_date"] == end.isoformat()
+    assert "shipping_address" not in payload
+    assert "下单页自行填写" in final["ai_response"]
+
+
+def test_shipping_address_is_prefilled_and_raw_pii_is_redacted_across_instances(
+    db, seeded, monkeypatch
+):
+    monkeypatch.setattr(guide.llm, "llm_available", lambda: False)
+    start = date.today() + timedelta(days=24)
+    end = start + timedelta(days=2)
+    message = (
+        f"我要租R5，{start.isoformat()}到{end.isoformat()}，"
+        "姓名：张三，电话：13800138000，地址：江西省南昌市西湖区丁公路北88号2栋301"
+    )
+
+    first = chat_service.handle_message(db, message)
+    row = db.execute(
+        select(Conversation).where(
+            Conversation.session_id == first["session_id"],
+            Conversation.round_number == 1,
+        )
+    ).scalars().one()
+    assert "13800138000" not in row.user_message
+    assert "丁公路" not in row.user_message
+    assert "原文已脱敏" in row.user_message
+    assert row.entities["sales_journey"]["shipping_address"]["receiver_name"] == "张三"
+
+    get_session_store().delete(first["session_id"])
+    final = chat_service.handle_message(
+        db, "不需要免押", session_id=first["session_id"]
+    )
+    payload = final["next_actions"][0]["payload"]
+    assert payload["shipping_address"] == {
+        "receiver_name": "张三",
+        "phone": "13800138000",
+        "province": "江西省",
+        "city": "南昌市",
+        "district": "西湖区",
+        "detail_address": "丁公路北88号2栋301",
+    }
+    assert "完整收货信息" in final["ai_response"]
+
+
+def test_partial_shipping_fields_are_prefilled_without_guessing(db, seeded, monkeypatch):
+    monkeypatch.setattr(guide.llm, "llm_available", lambda: False)
+    start = date.today() + timedelta(days=28)
+    end = start + timedelta(days=2)
+    first = chat_service.handle_message(
+        db,
+        f"我要租R5，{start.isoformat()}到{end.isoformat()}，姓名：张三，电话：13800138000",
+    )
+
+    final = chat_service.handle_message(
+        db, "不需要免押", session_id=first["session_id"]
+    )
+    shipping = final["next_actions"][0]["payload"]["shipping_address"]
+    assert shipping == {"receiver_name": "张三", "phone": "13800138000"}
+    assert "缺少的内容请在下单页自行补全" in final["ai_response"]
+
+
+def test_shipping_pii_is_redacted_before_any_llm_call(db, monkeypatch):
+    captured = []
+    monkeypatch.setattr(guide.llm, "llm_available", lambda: True)
+
+    def answer(messages, **kwargs):
+        captured.append(messages)
+        if kwargs.get("json_mode"):
+            return '{"intent":"unknown","confidence":0.3,"entities":{}}'
+        return "请在下单页核对并填写收货信息。"
+
+    monkeypatch.setattr(guide.llm, "chat_completion", answer)
+    chat_service.handle_message(
+        db,
+        "姓名：张三，电话：13800138000，地址：江西省南昌市西湖区丁公路北88号2栋301",
+    )
+
+    llm_input = str(captured)
+    assert "13800138000" not in llm_input
+    assert "丁公路" not in llm_input
+    assert "原文已脱敏" in llm_input
 
 
 def test_guided_sales_restores_progress_from_database(db, seeded, monkeypatch):
