@@ -52,7 +52,7 @@ def test_chat_action_buttons_wrap_inside_the_assistant_bubble():
     assert "overflow-wrap:anywhere;word-break:break-word" in html
 
 
-def test_mobile_login_uses_shrinkable_layout_and_compact_signed_in_avatar():
+def test_mobile_login_uses_shrinkable_layout_and_cat_head_profile_entry():
     html = Path("app/static/index.html").read_text(encoding="utf-8")
 
     assert 'class="login-email auth-input"' in html
@@ -65,6 +65,11 @@ def test_mobile_login_uses_shrinkable_layout_and_compact_signed_in_avatar():
     assert ".hbar.user-on{flex-wrap:nowrap;align-items:center}" in html
     assert 'class="user-entry"' in html
     assert 'onclick="openProfile()"' in html
+    assert 'class="user-cat-frame"' in html
+    assert 'class="user-entry-label">我的</span>' in html
+    assert 'id="headerAvatar"' not in html
+    assert 'id="headerUserName"' not in html
+    assert ".login.signed-in .user-entry{width:64px;min-width:64px;height:56px;min-height:56px" in html
 
 
 def test_mobile_ai_panel_voice_fallback_and_profile_center_are_present():
@@ -85,6 +90,23 @@ def test_mobile_ai_panel_voice_fallback_and_profile_center_are_present():
     assert 'id="myOrders"' in html
     assert "'/api/auth/change-password'" in html
     assert "'/api/auth/me'" in html
+
+
+def test_mobile_ai_panel_prevents_keyboard_zoom_and_tracks_visual_viewport():
+    html = Path("app/static/index.html").read_text(encoding="utf-8")
+
+    assert "input,select,textarea{font-size:16px}" in html
+    assert "window.visualViewport" in html
+    assert "--app-height" in html
+    assert "--app-top" in html
+    assert "height:var(--app-height,100dvh)" in html
+    assert "max-width:100vw" in html
+    assert "if(input&&window.matchMedia('(max-width:900px)').matches)input.blur()" in html
+    assert "restoreMobileViewport(input);addBub('u',txt)" in html
+    assert "html,body{margin:0;max-width:100%;overflow-x:hidden}" in html
+    assert "overflow-wrap:anywhere;word-break:break-word" in html
+    assert "maximum-scale" not in html
+    assert "user-scalable=no" not in html
 
 
 def test_checkout_collects_and_displays_shipping_address_responsively():
