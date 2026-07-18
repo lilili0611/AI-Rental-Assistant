@@ -3,9 +3,9 @@
 | 项目 | 内容 |
 |------|------|
 | 文档类型 | Technical Specification |
-| 版本 | v2.10.1 |
-| 状态 | Phase 1+2 与 v2.1–v2.10 已实现；v2.10.1 修复移动端 AI 键盘视口并改版“我的”入口 |
-| 配套文档 | 《产品需求文档 (PRD) v2.10.1》 |
+| 版本 | v2.10.2 |
+| 状态 | Phase 1+2 与 v2.1–v2.10 已实现；v2.10.2 修复 AI 键盘收起穿模并扩展自然语言租期识别 |
+| 配套文档 | 《产品需求文档 (PRD) v2.10.2》 |
 | 范围 | Phase 1–2 详细规格 + Phase 3–4 接口预留 |
 
 ---
@@ -1511,3 +1511,51 @@ listening ──无内容/错误──> idle（保留键盘入口）
 - [x] 375×812 浏览器模拟键盘高度变化，验证聚焦、发送、收键盘后无横向溢出。
 - [x] 375×812 与 812×375 登录后猫头“我的”入口完整可见、可点击，“我的”页功能无回归。
 - [x] `GET /health` 返回 v2.10.1；375×812 生产页输入字号 16px，键盘模拟高度 500px 时对话层等高，发送后焦点清除，恢复 812px 时 `scrollWidth=clientWidth=375`；登录入口文案仅为“我的”、位图数为 0。
+
+---
+
+## 24. v2.10.2 键盘防穿模与日期解析规格
+
+### 24.1 全屏层层级与视口收敛
+
+- `body.panel-open::after` 创建 `position:fixed; inset:0` 的同色遮罩，z-index 为 80；首页 `.mobile-ai-dock` 为 60，`.app-panel` 为 90。
+- 遮罩无交互、无动画，只在 `.panel-open` 期间存在，用于覆盖微信 WebView 键盘动画中对话层与布局视口之间的瞬时缝隙。
+- `restoreMobileViewport()` 先 `blur()`，立即按 `visualViewport` 同步，再于键盘动画后分阶段同步；若当前无可编辑元素聚焦且 `visualViewport.scale == 1`，最终高度取 `visualViewport.height` 与 `window.innerHeight` 的较大值并将顶部偏移归零。
+- 不禁用手动缩放；当 `visualViewport.scale != 1` 时不强制完整屏幕高度。
+
+### 24.2 规则日期解析器
+
+`recognizer.extract_entities()` 的日期优先级：
+
+```text
+相对日期区间/语义角色
+  → 中文月日区间
+  → 数字日期区间
+  → 日期 + 租期天数推算
+```
+
+- 相对日映射：今天=0、明天=1、后天=2、大后天=3，基准为服务器 `date.today()`。匹配顺序必须优先“大后天”以避免被“后天”截断。
+- 两个日期按文本顺序映射为 `start_date`/`end_date`；单日期含“还/归还/还机/结束/到期/延期/改期”映射为 `end_date`，否则映射为 `start_date`。
+- 数字 token 支持 `YYYY-M-D`、`YYYY/M/D`、`YYYY.M.D`、`M-D`、`M/D`、`M.D`；区间分隔符由两个 token 之间的文字决定，支持“到/至/~/-/—”。
+- 未显式年份的 token 取最近未来日；若第二日早于第一日且第二 token 无年份，把第二日调整到次年。
+- 租期天数支持阿拉伯数字与一至三十一的中文数字，`end_date = start_date + days - 1`。
+
+### 24.3 导购等待租期转换
+
+```text
+waiting_dates + start_date + end_date  → inventory_checked
+waiting_dates + start_date             → waiting_end_date
+waiting_dates + end_date               → waiting_start_date
+waiting_end_date + duration_days       → inventory_checked
+```
+
+- 日期实体优先于“发散问题”判断，不调用 LLM。
+- 只得到一个边界时保留已识别值，并仅追问另一边界；不重置已选设备、场景和配置。
+- 租期完整后继续真实库存、计价和免押选择，不绕过原有业务数据检查。
+
+### 24.4 测试
+
+- [x] 单元测试覆盖相对日期、语义角色、斜杠/点号/中文区间、中文天数、跨年与无效 token 忽略。
+- [x] 导购集成测试覆盖“明天租，后天还”、分两轮补充起止日、已知起租日+天数和斜杠日期区间。
+- [x] 静态页面测试锁定 60/80/90 层级、分阶段视口收敛和不禁用缩放。
+- [ ] 375×812 与键盘模拟高度下无横向溢出、无底页穿透；生产健康检查返回 v2.10.2。

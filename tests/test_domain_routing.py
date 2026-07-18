@@ -109,6 +109,18 @@ def test_mobile_ai_panel_prevents_keyboard_zoom_and_tracks_visual_viewport():
     assert "user-scalable=no" not in html
 
 
+def test_mobile_ai_panel_masks_keyboard_transition_without_showing_home_dock():
+    html = Path("app/static/index.html").read_text(encoding="utf-8")
+
+    assert 'body.panel-open::after{content:"";position:fixed;inset:0;z-index:80' in html
+    assert ".mobile-ai-dock{display:none;position:fixed;z-index:60" in html
+    assert ".app-panel{display:none;position:fixed" in html
+    assert "z-index:90" in html
+    assert "setTimeout(()=>syncAppViewport(true),360)" in html
+    assert "setTimeout(()=>syncAppViewport(true),700)" in html
+    assert "Math.abs((viewport.scale||1)-1)<.01" in html
+
+
 def test_checkout_collects_and_displays_shipping_address_responsively():
     customer = Path("app/static/index.html").read_text(encoding="utf-8")
     admin = Path("app/static/admin.html").read_text(encoding="utf-8")

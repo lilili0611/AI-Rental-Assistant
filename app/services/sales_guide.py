@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
 
 from sqlalchemy import select
@@ -357,6 +357,11 @@ def process(db: Session, message: str, journey: dict) -> Optional[dict]:
     for key in ("start_date", "end_date", "quantity"):
         if entities.get(key):
             journey[key] = entities[key]
+    if entities.get("days") and journey.get("start_date") and not entities.get("end_date"):
+        start_for_duration = date.fromisoformat(journey["start_date"])
+        journey["end_date"] = (
+            start_for_duration + timedelta(days=int(entities["days"]) - 1)
+        ).isoformat()
 
     if (
         journey.get("requested_devices")
@@ -426,9 +431,25 @@ def process(db: Session, message: str, journey: dict) -> Optional[dict]:
             "journey": journey,
         }
 
+    if journey.get("start_date") and not journey.get("end_date"):
+        start_value = date.fromisoformat(journey["start_date"])
+        start_label = f"{start_value.year}年{start_value.month}月{start_value.day}日"
+        return {
+            "text": f"已记下起租日：{start_label}。请告诉我归还日，也可以说“后天还”或“租3天”。",
+            "actions": [],
+            "journey": journey,
+        }
+    if journey.get("end_date") and not journey.get("start_date"):
+        end_value = date.fromisoformat(journey["end_date"])
+        end_label = f"{end_value.year}年{end_value.month}月{end_value.day}日"
+        return {
+            "text": f"已记下归还日：{end_label}。请告诉我起租日，例如“明天租”。",
+            "actions": [],
+            "journey": journey,
+        }
     if not journey.get("start_date") or not journey.get("end_date"):
         return {
-            "text": "请告诉我起租日和归还日，例如“7月20日到7月22日”，我马上查库存和租金。",
+            "text": "请告诉我起租日和归还日，例如“明天租，后天还”或“7/20~7/23”，我马上查库存和租金。",
             "actions": [],
             "journey": journey,
         }

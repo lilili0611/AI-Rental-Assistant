@@ -10,10 +10,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Optional
-
-from dateutil import parser as date_parser
 
 from app.integrations import llm
 
@@ -79,10 +77,11 @@ _CAMERA_PATTERN = re.compile(
     r"[0-9]{2,3}-[0-9]{2,3}mm|[0-9]{2,3}mm)",
     re.IGNORECASE,
 )
-_DAYS_PATTERN = re.compile(r"(\d+)\s*天")
+_DAYS_PATTERN = re.compile(r"(\d+|[一二三四五六七八九十]{1,3})\s*天")
 _QTY_PATTERN = re.compile(r"(\d+)\s*(台|个|只)")
 _DATE_PATTERN = re.compile(
-    r"(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?|\d{1,2}[-/月]\d{1,2}日?)"
+    r"(?<!\d)(\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}[日号]?|"
+    r"\d{1,2}[-/.月]\d{1,2}[日号]?)(?!\d)"
 )
 _CN_NUM = "零一二三四五六七八九十"
 _CN_MONTH_DAY = re.compile(
@@ -91,6 +90,9 @@ _CN_MONTH_DAY = re.compile(
 _CN_RANGE_TAIL = re.compile(
     r"(?:到|至|~|-|—)\s*([零一二三四五六七八九十\d]{1,3})[号日]?"
 )
+_RELATIVE_DATE_PATTERN = re.compile(r"大后天|后天|明天|今天")
+_RELATIVE_DATE_OFFSETS = {"今天": 0, "明天": 1, "后天": 2, "大后天": 3}
+_END_DATE_CUE_PATTERN = re.compile(r"归还|还机|还回|还|结束|截止|到期|延期|延长|改期")
 
 
 def extract_entities(message: str) -> dict:
@@ -109,9 +111,9 @@ def extract_entities(message: str) -> dict:
                 seen.append(d)
         entities["devices"] = seen
 
-    days_m = _DAYS_PATTERN.search(message)
-    if days_m:
-        entities["days"] = int(days_m.group(1))
+    duration_days = _extract_duration_days(message)
+    if duration_days:
+        entities["days"] = duration_days
 
     qty_m = _QTY_PATTERN.search(message)
     if qty_m:
@@ -125,34 +127,91 @@ def extract_entities(message: str) -> dict:
 
 
 def _parse_dates(message: str) -> dict:
-    """解析日期区间。支持 'X月Y日到M月N日'、'X天' 推算等。"""
+    """解析日期区间。支持相对日期、多种数字格式与日期+天数。"""
+    relative_dates = _parse_relative_dates(message)
+    if relative_dates:
+        return relative_dates
+
+    raw = _DATE_PATTERN.findall(message)
+    has_explicit_or_numeric_format = bool(
+        len(raw) >= 2
+        or any(re.search(r"\d{4}|年|/|\.", token) for token in raw)
+    )
+    if raw and has_explicit_or_numeric_format:
+        absolute_dates = _parse_absolute_dates(message, raw)
+        if absolute_dates:
+            return absolute_dates
+
     cn_dates = _parse_chinese_month_day(message)
     if cn_dates:
         return cn_dates
 
-    raw = _DATE_PATTERN.findall(message)
-    parsed = []
-    year = date.today().year
-    for r in raw:
-        norm = (
-            r.replace("年", "-").replace("月", "-").replace("日", "")
-        ).strip("-/ ")
-        try:
-            dt = date_parser.parse(norm, default=datetime(year, 1, 1)).date()
-            parsed.append(dt)
-        except (ValueError, OverflowError):
-            continue
-    result: dict = {}
-    if len(parsed) >= 2:
-        result["start_date"] = parsed[0].isoformat()
-        result["end_date"] = parsed[1].isoformat()
-    elif len(parsed) == 1:
-        result["start_date"] = parsed[0].isoformat()
-        days_m = _DAYS_PATTERN.search(message)
-        if days_m:
-            end = parsed[0] + timedelta(days=int(days_m.group(1)) - 1)
-            result["end_date"] = end.isoformat()
+    return _parse_absolute_dates(message, raw) if raw else {}
+
+
+def _single_date_result(value: date, message: str) -> dict:
+    """单日期根据“还/归还/延期”等语义映射为归还日。"""
+    key = "end_date" if _END_DATE_CUE_PATTERN.search(message) else "start_date"
+    result = {key: value.isoformat()}
+    duration_days = _extract_duration_days(message)
+    if key == "start_date" and duration_days:
+        result["end_date"] = (value + timedelta(days=duration_days - 1)).isoformat()
     return result
+
+
+def _parse_relative_dates(message: str) -> dict:
+    matches = list(_RELATIVE_DATE_PATTERN.finditer(message))
+    if not matches:
+        return {}
+    today = date.today()
+    values = [today + timedelta(days=_RELATIVE_DATE_OFFSETS[m.group(0)]) for m in matches]
+    if len(values) >= 2:
+        return {"start_date": values[0].isoformat(), "end_date": values[1].isoformat()}
+    return _single_date_result(values[0], message)
+
+
+def _parse_date_token(raw: str) -> tuple[Optional[date], bool]:
+    normalized = (
+        raw.replace("年", "-")
+        .replace("月", "-")
+        .replace("日", "")
+        .replace("号", "")
+        .replace("/", "-")
+        .replace(".", "-")
+        .strip("- ")
+    )
+    parts = normalized.split("-")
+    explicit_year = len(parts) == 3
+    try:
+        if explicit_year:
+            year, month, day = map(int, parts)
+            return date(year, month, day), True
+        if len(parts) != 2:
+            return None, False
+        month, day = map(int, parts)
+        return _future_date(date.today().year, month, day), False
+    except ValueError:
+        return None, explicit_year
+
+
+def _parse_absolute_dates(message: str, raw: list[str]) -> dict:
+    parsed = []
+    for token in raw:
+        value, explicit_year = _parse_date_token(token)
+        if value:
+            parsed.append((value, explicit_year))
+    if len(parsed) >= 2:
+        start, _ = parsed[0]
+        end, end_has_year = parsed[1]
+        if end < start and not end_has_year:
+            try:
+                end = date(end.year + 1, end.month, end.day)
+            except ValueError:
+                return {}
+        return {"start_date": start.isoformat(), "end_date": end.isoformat()}
+    if len(parsed) == 1:
+        return _single_date_result(parsed[0][0], message)
+    return {}
 
 
 def _cn_to_int(raw: str) -> Optional[int]:
@@ -172,6 +231,14 @@ def _cn_to_int(raw: str) -> Optional[int]:
     if len(raw) == 1 and raw in _CN_NUM:
         return _CN_NUM.find(raw)
     return None
+
+
+def _extract_duration_days(message: str) -> Optional[int]:
+    match = _DAYS_PATTERN.search(message)
+    if not match:
+        return None
+    value = _cn_to_int(match.group(1))
+    return value if value and value > 0 else None
 
 
 def _future_date(year: int, month: int, day: int) -> Optional[date]:
@@ -213,7 +280,6 @@ def _parse_chinese_month_day(message: str) -> dict:
 
     if len(parsed) == 1:
         start, first_match = parsed[0]
-        result["start_date"] = start.isoformat()
         tail = _CN_RANGE_TAIL.search(message[first_match.end():])
         if tail:
             end_day = _cn_to_int(tail.group(1))
@@ -222,10 +288,14 @@ def _parse_chinese_month_day(message: str) -> dict:
                 if end and end < start:
                     end = _future_date(start.year + 1, start.month, end_day)
                 if end:
+                    result["start_date"] = start.isoformat()
                     result["end_date"] = end.isoformat()
-        elif _DAYS_PATTERN.search(message):
-            days = int(_DAYS_PATTERN.search(message).group(1))
+        elif _extract_duration_days(message):
+            days = _extract_duration_days(message)
+            result["start_date"] = start.isoformat()
             result["end_date"] = (start + timedelta(days=days - 1)).isoformat()
+        else:
+            return _single_date_result(start, message)
     return result
 
 

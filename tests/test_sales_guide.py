@@ -349,7 +349,58 @@ def test_partial_date_answer_does_not_trigger_llm(db, seeded, monkeypatch):
 
     assert result["detected_intent"] == "guided_sales"
     assert result["answer_source"] == "workflow"
-    assert "起租日和归还日" in result["ai_response"]
+    assert "已记下起租日" in result["ai_response"]
+    assert "请告诉我归还日" in result["ai_response"]
+
+
+def test_relative_dates_complete_waiting_sales_journey(db, seeded, monkeypatch):
+    sid = _reach_date_step(db, monkeypatch)
+
+    result = chat_service.handle_message(db, "明天租，后天还", session_id=sid)
+
+    assert result["detected_intent"] == "guided_sales"
+    assert result["answer_source"] == "workflow"
+    assert "是否需要申请免押" in result["ai_response"]
+    journey = get_session_store().get(sid)["sales_journey"]
+    assert journey["start_date"] == (date.today() + timedelta(days=1)).isoformat()
+    assert journey["end_date"] == (date.today() + timedelta(days=2)).isoformat()
+
+
+def test_relative_dates_can_be_completed_across_two_rounds(db, seeded, monkeypatch):
+    sid = _reach_date_step(db, monkeypatch)
+
+    first = chat_service.handle_message(db, "明天租", session_id=sid)
+    assert "已记下起租日" in first["ai_response"]
+    assert "请告诉我归还日" in first["ai_response"]
+
+    second = chat_service.handle_message(db, "后天还", session_id=sid)
+    assert "是否需要申请免押" in second["ai_response"]
+
+
+def test_duration_can_complete_a_known_start_date(db, seeded, monkeypatch):
+    sid = _reach_date_step(db, monkeypatch)
+    chat_service.handle_message(db, "明天租", session_id=sid)
+
+    result = chat_service.handle_message(db, "租三天", session_id=sid)
+
+    assert "是否需要申请免押" in result["ai_response"]
+    journey = get_session_store().get(sid)["sales_journey"]
+    assert journey["end_date"] == (date.today() + timedelta(days=3)).isoformat()
+
+
+def test_slash_date_range_completes_waiting_sales_journey(db, seeded, monkeypatch):
+    sid = _reach_date_step(db, monkeypatch)
+    start = date.today() + timedelta(days=10)
+    end = start + timedelta(days=2)
+
+    result = chat_service.handle_message(
+        db, f"{start.month}/{start.day}~{end.month}/{end.day}", session_id=sid
+    )
+
+    assert "是否需要申请免押" in result["ai_response"]
+    journey = get_session_store().get(sid)["sales_journey"]
+    assert journey["start_date"] == start.isoformat()
+    assert journey["end_date"] == end.isoformat()
 
 
 def test_paused_journey_restores_from_database(db, seeded, monkeypatch):
