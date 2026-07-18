@@ -52,16 +52,39 @@ def test_chat_action_buttons_wrap_inside_the_assistant_bubble():
     assert "overflow-wrap:anywhere;word-break:break-word" in html
 
 
-def test_mobile_login_uses_shrinkable_two_column_grid_without_inline_widths():
+def test_mobile_login_uses_shrinkable_layout_and_compact_signed_in_avatar():
     html = Path("app/static/index.html").read_text(encoding="utf-8")
 
-    assert 'class="login-email"' in html
-    assert 'class="login-password"' in html
+    assert 'class="login-email auth-input"' in html
+    assert 'class="login-password auth-input"' in html
     assert 'style="width:190px"' not in html
     assert 'style="width:120px"' not in html
     assert ".login{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}" in html
     assert ".login .who{grid-column:1/-1;white-space:nowrap}" in html
     assert ".login input,.login button{width:100%;min-width:0}" in html
+    assert ".hbar.user-on{flex-wrap:nowrap;align-items:center}" in html
+    assert 'class="user-entry"' in html
+    assert 'onclick="openProfile()"' in html
+
+
+def test_mobile_ai_panel_voice_fallback_and_profile_center_are_present():
+    html = Path("app/static/index.html").read_text(encoding="utf-8")
+
+    assert 'id="mobileAiDock"' in html
+    assert "问 AI 或按住说话" in html
+    assert 'id="aiPanel"' in html
+    assert 'id="aiMsgs"' in html
+    assert "['msgs','aiMsgs']" in html
+    assert "window.SpeechRecognition||window.webkitSpeechRecognition" in html
+    assert "rec.lang='zh-CN'" in html
+    assert "当前浏览器不支持语音识别，请使用键盘输入" in html
+    assert "本站不保存音频" in html
+    assert "env(safe-area-inset-bottom)" in html
+    assert 'id="profilePanel"' in html
+    assert 'id="profileAvatar"' in html
+    assert 'id="myOrders"' in html
+    assert "'/api/auth/change-password'" in html
+    assert "'/api/auth/me'" in html
 
 
 def test_checkout_collects_and_displays_shipping_address_responsively():

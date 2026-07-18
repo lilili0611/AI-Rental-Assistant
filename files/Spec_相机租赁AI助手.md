@@ -3,9 +3,9 @@
 | 项目 | 内容 |
 |------|------|
 | 文档类型 | Technical Specification |
-| 版本 | v2.9.5 |
-| 状态 | Phase 1+2 与 v2.1–v2.9 已实现；v2.9.5 扩展导购状态与下单页预填动作 |
-| 配套文档 | 《产品需求文档 (PRD) v2.9.5》 |
+| 版本 | v2.10.0 |
+| 状态 | Phase 1+2 与 v2.1–v2.9 已实现；v2.10.0 增加移动端独立 AI 对话、语音输入和用户中心 |
+| 配套文档 | 《产品需求文档 (PRD) v2.10.0》 |
 | 范围 | Phase 1–2 详细规格 + Phase 3–4 接口预留 |
 
 ---
@@ -1432,3 +1432,51 @@ checkout_form_filled ──客户最终确认──> POST /api/orders
 - [x] 125 项回归与前端脚本语法通过；静态测试锁定动作顺序、字段白名单和无自动下单。
 - [x] 375×812 本地真实浏览器验证设备、日期、报价和六个地址字段正确带入；无地址新流程字段为空且页面无横向溢出。
 - [x] `bozipaopao.cn` 已发布 v2.9.5；生产健康检查、设备/日期/报价预填、空地址补填提示和 375px 无横向溢出验证通过。
+
+---
+
+## 22. v2.10.0 移动端 AI 与用户中心规格
+
+### 22.1 前端导航与共享对话
+
+- `max-width:600px` 显示固定底部 `.mobile-ai-dock`，使用 `padding-bottom:calc(... + env(safe-area-inset-bottom))` 为页面内容留位；触控区不小于 48px。
+- `#aiPanel` 为移动端全屏对话层，打开时锁定背景滚动，关闭时恢复原滚动位置；桌面端不展示悬浮入口，原 `.chat` 保留。
+- `addBub()` 同时渲染 `#msgs` 和 `#aiMsgs`；两处输入统一调用 `send()`，共用 `SESSION`，动态动作按钮调用同一 `onAct()`。
+- 长按阈值 350ms：超过阈值后打开对话层并调用语音识别；短按只打开对话层。关闭、页面隐藏或松手时停止识别。
+
+### 22.2 语音识别状态
+
+```text
+idle ──用户按住──> requesting_permission ──允许──> listening
+  └────────────────────────不支持/拒绝──────────> unavailable
+listening ──interim result──> listening（更新文字）
+listening ──松手/final result──> submitting ──> idle
+listening ──无内容/错误──> idle（保留键盘入口）
+```
+
+前端使用 `window.SpeechRecognition || window.webkitSpeechRecognition`，`lang='zh-CN'`、`continuous=false`、`interimResults=true`。只有最终非空文本才进入 `/api/chat`；音频不发送到本站后端、不写数据库。页面明确提示识别能力由浏览器提供且可能调用浏览器厂商云服务。
+
+### 22.3 用户资料模型与 API
+
+`users` 新增可空 `avatar_data TEXT`。启动迁移通过 `ensure_runtime_schema()` 在旧库补列。
+
+| 方法 | 路径 | 请求/响应 | 权限 |
+|---|---|---|---|
+| GET | `/api/auth/me` | 当前 `user_id/email/name/role/avatar_data` | customer Cookie |
+| PATCH | `/api/auth/me` | `name?`、`email?`、`avatar_data?`、`current_password?` | customer Cookie |
+| POST | `/api/auth/change-password` | `current_password/new_password` | customer Cookie |
+
+规则：
+
+- 昵称去空格后 1–100 字；邮箱归一化后唯一，变更邮箱必须验证当前密码。
+- 头像只接受 `data:image/jpeg|png|webp;base64,...`，解码后不超过 300KB，字段总长不超过 450KB；空字符串表示恢复默认头像。
+- 修改密码必须验证当前密码，新密码 8–128 字且不能与当前密码相同；数据库只写 PBKDF2 加盐哈希。
+- 所有失败统一返回结构化错误；资料接口仅能修改依赖注入得到的当前用户，不接受 `user_id` 请求参数。
+- 资料与头像不触发订单、库存或飞书同步；订单列表继续使用 `GET /api/orders` 的本人过滤。
+
+### 22.4 测试与验收
+
+- [x] API：未登录拒绝、本人资料读取、昵称/头像修改、邮箱改动需当前密码、邮箱冲突、密码校验与哈希更新。
+- [x] 前端静态：悬浮入口、独立对话层、Web Speech 降级、共享会话、“我的”页和安全区样式存在。
+- [x] 375×812：无横向溢出，悬浮入口不遮挡最终内容，登录后头像入口出现，资料和订单页可用；812×375 横屏同样无溢出。
+- [ ] 生产健康检查与主要交互验证通过；不创建测试订单、不记录测试音频。

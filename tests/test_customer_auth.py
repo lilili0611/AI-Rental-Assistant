@@ -97,3 +97,126 @@ def test_phone_login_can_be_enabled_for_compat(db, monkeypatch):
     result = auth.phone_login(auth.PhoneLoginRequest(phone="13800000001"), db=db)
 
     assert result["phone"] == "13800000001"
+
+
+def test_customer_can_read_and_update_own_profile(db):
+    auth.register(
+        auth.CustomerRegisterRequest(
+            email="profile@example.com", password="secret123", name="旧昵称"
+        ),
+        response=Response(),
+        db=db,
+    )
+    user = db.execute(
+        select(User).where(User.email == "profile@example.com")
+    ).scalars().one()
+    avatar = (
+        "data:image/png;base64,"
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    )
+
+    before = auth.get_profile(user=user)
+    assert before["user_id"] == user.id
+    assert before["avatar_data"] is None
+
+    updated = auth.update_profile(
+        auth.CustomerProfileUpdateRequest(name="新昵称", avatar_data=avatar),
+        db=db,
+        user=user,
+    )
+    assert updated["name"] == "新昵称"
+    assert updated["avatar_data"] == avatar
+
+
+def test_customer_email_change_requires_current_password_and_uniqueness(db):
+    for email in ("first@example.com", "second@example.com"):
+        auth.register(
+            auth.CustomerRegisterRequest(email=email, password="secret123"),
+            response=Response(),
+            db=db,
+        )
+    user = db.execute(
+        select(User).where(User.email == "first@example.com")
+    ).scalars().one()
+
+    with pytest.raises(HTTPException) as exc:
+        auth.update_profile(
+            auth.CustomerProfileUpdateRequest(email="new@example.com"),
+            db=db,
+            user=user,
+        )
+    assert exc.value.status_code == 401
+
+    changed = auth.update_profile(
+        auth.CustomerProfileUpdateRequest(
+            email="NEW@example.com", current_password="secret123"
+        ),
+        db=db,
+        user=user,
+    )
+    assert changed["email"] == "new@example.com"
+
+    with pytest.raises(HTTPException) as exc:
+        auth.update_profile(
+            auth.CustomerProfileUpdateRequest(
+                email="second@example.com", current_password="secret123"
+            ),
+            db=db,
+            user=user,
+        )
+    assert exc.value.status_code == 409
+
+
+def test_customer_password_change_verifies_current_and_hashes_new_password(db):
+    auth.register(
+        auth.CustomerRegisterRequest(email="password@example.com", password="secret123"),
+        response=Response(),
+        db=db,
+    )
+    user = db.execute(
+        select(User).where(User.email == "password@example.com")
+    ).scalars().one()
+    old_hash = user.password_hash
+
+    with pytest.raises(HTTPException) as exc:
+        auth.change_password(
+            auth.CustomerPasswordChangeRequest(
+                current_password="wrong", new_password="newSecret456"
+            ),
+            db=db,
+            user=user,
+        )
+    assert exc.value.status_code == 401
+
+    result = auth.change_password(
+        auth.CustomerPasswordChangeRequest(
+            current_password="secret123", new_password="newSecret456"
+        ),
+        db=db,
+        user=user,
+    )
+    assert result == {"ok": True}
+    assert user.password_hash != old_hash
+    assert security.verify_password("newSecret456", user.password_hash)
+    assert not security.verify_password("secret123", user.password_hash)
+
+
+def test_customer_profile_rejects_spoofed_avatar_content(db):
+    auth.register(
+        auth.CustomerRegisterRequest(email="avatar@example.com", password="secret123"),
+        response=Response(),
+        db=db,
+    )
+    user = db.execute(
+        select(User).where(User.email == "avatar@example.com")
+    ).scalars().one()
+
+    with pytest.raises(HTTPException) as exc:
+        auth.update_profile(
+            auth.CustomerProfileUpdateRequest(
+                avatar_data="data:image/png;base64,aGVsbG8="
+            ),
+            db=db,
+            user=user,
+        )
+    assert exc.value.status_code == 422

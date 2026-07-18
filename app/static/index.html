@@ -39,6 +39,12 @@
   .who{font-size:13px;color:var(--ink-2);display:flex;align-items:center;gap:6px}
   .who .dot{width:9px;height:9px;border-radius:50%;background:var(--ink-3)}
   .who.on .dot{background:var(--mint);box-shadow:0 0 0 4px var(--ok-50)}
+  .user-entry{display:none;height:auto;min-height:52px;padding:4px 12px 4px 5px;background:#fff;color:var(--ink);border:2px solid var(--line-2);box-shadow:var(--sh-sm);text-align:left}
+  .user-entry:hover{background:var(--brand-50);color:var(--ink);border-color:var(--brand)}
+  .user-avatar{width:42px;height:42px;border-radius:50%;object-fit:cover;background:var(--surface-2);border:2px solid var(--brand-50);flex:none}
+  .user-entry-copy{display:flex;flex-direction:column;line-height:1.2}.user-entry-copy strong{font-size:14px}.user-entry-copy small{font-size:11px;color:var(--ink-2);margin-top:3px}
+  .login.signed-in .who,.login.signed-in .auth-input,.login.signed-in .auth-action{display:none}
+  .login.signed-in .user-entry{display:inline-flex}
   /* controls */
   input,select,button{font-size:14px;font-family:inherit;letter-spacing:.02em}
   input,select{height:46px;padding:0 14px;border:2px solid var(--line-2);border-radius:14px;background:#fff;color:var(--ink);outline:none;transition:.2s var(--ease);font-weight:600}
@@ -133,6 +139,28 @@
     font-family:"Sora",sans-serif;font-size:12px;font-weight:800}
   .chatbar{display:flex;gap:8px;margin-top:10px}.chatbar input{flex:1}
   .typing{align-self:flex-start;color:var(--ink-3);font-size:13px;display:flex;align-items:center;gap:7px;padding:2px}
+  /* mobile AI entry + full-screen panels */
+  .mobile-ai-dock{display:none;position:fixed;z-index:60;left:50%;bottom:calc(14px + env(safe-area-inset-bottom));transform:translateX(-50%);height:56px;min-width:230px;padding:0 22px;background:#fff;color:var(--brand);border:2px solid var(--brand);box-shadow:var(--sh-lg);touch-action:manipulation}
+  .mobile-ai-dock:hover{background:var(--brand-50);color:var(--brand)}
+  .mobile-ai-dock.listening{background:var(--brand);color:#fff;animation:voicePulse 1s ease-in-out infinite}
+  .app-panel{display:none;position:fixed;inset:0;z-index:90;background:var(--bg);flex-direction:column;min-width:0;min-height:100dvh}
+  .app-panel.open{display:flex;animation:panelIn .24s var(--ease)}
+  .panel-head{min-height:68px;padding:10px 16px;display:flex;align-items:center;gap:10px;background:#fff;border-bottom:2px solid var(--line);padding-top:calc(10px + env(safe-area-inset-top))}
+  .panel-head button{width:48px;height:48px;padding:0;box-shadow:none}.panel-title{display:flex;align-items:center;gap:9px;min-width:0}.panel-title img{width:42px;height:42px;object-fit:contain}.panel-title h2{font-size:20px}.panel-title p{margin:2px 0 0;color:var(--ink-2);font-size:12px;line-height:1.35}
+  .ai-panel-body{flex:1;min-height:0;width:min(100%,760px);margin:0 auto;padding:14px 16px 0;display:flex;flex-direction:column}
+  .ai-panel-body .msgs{min-height:0;padding-bottom:14px}.ai-panel-body .bub{font-size:15px;max-width:88%}
+  .ai-compose{flex:none;padding:10px 0 calc(12px + env(safe-area-inset-bottom));background:var(--bg);border-top:1px solid var(--line)}
+  .ai-text-row{display:flex;gap:8px}.ai-text-row input{flex:1;min-width:0}.ai-text-row button{width:48px;padding:0}
+  .voice-hold{width:100%;height:54px;margin-top:8px;background:#fff;color:var(--ink);border:2px solid var(--brand);box-shadow:none;touch-action:none;user-select:none;-webkit-user-select:none}
+  .voice-hold.listening{background:var(--brand);color:#fff;animation:voicePulse 1s ease-in-out infinite}
+  .voice-status{min-height:20px;margin-top:5px;text-align:center;color:var(--ink-2);font-size:11px;line-height:1.4}
+  .profile-body{flex:1;overflow:auto;width:min(100%,760px);margin:0 auto;padding:18px 16px calc(32px + env(safe-area-inset-bottom))}
+  .profile-section{background:#fff;border:2px solid var(--line);border-radius:22px;padding:18px;margin-bottom:16px;box-shadow:var(--sh-sm)}
+  .profile-section h3{font-size:18px;margin-bottom:14px}.profile-avatar-row{display:flex;align-items:center;gap:16px}.profile-avatar{width:82px;height:82px;border-radius:50%;object-fit:cover;background:var(--surface-2);border:3px solid var(--brand-50)}
+  .profile-avatar-actions{display:flex;gap:8px;flex-wrap:wrap}.profile-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:16px}.profile-grid .field{min-width:0}.profile-grid input{width:100%;min-width:0}.profile-grid .wide{grid-column:1/-1}.profile-help{font-size:12px;color:var(--ink-2);margin:9px 0 0}.profile-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.profile-actions button{flex:1;min-width:130px}
+  .panel-open{overflow:hidden}.sr-only{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+  @keyframes panelIn{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+  @keyframes voicePulse{50%{box-shadow:0 0 0 9px rgba(var(--brand-rgb),.13)}}
   /* toast */
   .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(14px);background:var(--ink);color:#fff;
     padding:13px 22px;border-radius:999px;opacity:0;transition:.3s var(--bounce);z-index:99;pointer-events:none;box-shadow:var(--sh-lg);max-width:90vw;font-weight:700}
@@ -145,16 +173,22 @@
     .reveal,.cam{opacity:1!important;transform:none!important}
     button:hover,.cam:hover{transform:none}
   }
+	  @media(max-width:900px){
+	    body{padding-bottom:calc(92px + env(safe-area-inset-bottom))}.mobile-ai-dock{display:inline-flex}.toast{bottom:calc(84px + env(safe-area-inset-bottom))}
+	  }
 	  @media(max-width:600px){
-	    .hbar{padding:11px 14px;align-items:flex-start}.wrap{padding:16px 14px}
+	    body{padding-bottom:calc(92px + env(safe-area-inset-bottom))}.hbar{padding:11px 14px;align-items:flex-start}.wrap{padding:16px 14px}
 	    .logo,.login{width:100%;min-width:0}
 	    .login{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
 	    .login .who{grid-column:1/-1;white-space:nowrap}
 	    .login input,.login button{width:100%;min-width:0}
+	    .hbar.user-on{flex-wrap:nowrap;align-items:center}.hbar.user-on .logo{width:auto;min-width:0;flex:1}.hbar.user-on .logo .sub{display:none}
+	    .login.signed-in{display:flex;width:auto;margin-left:auto;align-self:center}.login.signed-in .user-entry{width:52px;min-width:52px;height:52px;padding:3px;border:0;background:transparent;box-shadow:none}.login.signed-in .user-entry-copy{display:none}.login.signed-in .user-avatar{width:46px;height:46px;border-color:var(--brand)}
+	    .mobile-ai-dock{display:inline-flex}.toast{bottom:calc(84px + env(safe-area-inset-bottom))}
 	    .grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
 	    .shipping-grid{grid-template-columns:1fr}
 	    .shipping-grid .shipping-half,.shipping-grid .shipping-third,.shipping-grid .shipping-wide{grid-column:1/-1}
-	    .quote .total .big{font-size:24px}.logo h1{font-size:19px}.route-grid{grid-template-columns:1fr}
+	    .quote .total .big{font-size:24px}.logo h1{font-size:19px}.route-grid{grid-template-columns:1fr}.profile-grid{grid-template-columns:1fr}.profile-grid .wide{grid-column:auto}
 	  }
 </style>
 </head>
@@ -200,20 +234,29 @@
   <symbol id="i-send" viewBox="0 0 24 24"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></symbol>
   <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v5h-5"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 22a8 8 0 0 1 16 0"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></symbol>
 </svg>
 
 <header>
-  <div class="hbar">
+  <div class="hbar" id="hbar">
     <div class="logo">
       <div class="mark"><img src="/static/mascot.png" alt="猫猫头" style="width:52px;height:52px;object-fit:contain"></div>
       <div><h1>猫猫头相机租赁</h1><div class="sub">白猫陪你拍，租得超开心 🐾</div></div>
     </div>
-	    <div class="login">
+	    <div class="login" id="loginBox">
 	      <span class="who" id="who"><span class="dot"></span>未登录</span>
-	      <input class="login-email" id="email" type="email" placeholder="邮箱" value="demo@example.com" aria-label="邮箱" />
-	      <input class="login-password" id="password" type="password" placeholder="密码" value="demo1234" aria-label="密码" onkeydown="if(event.key==='Enter')login()" />
-	      <button onclick="login()">登录</button>
-	      <button class="ghost" onclick="register()">注册</button>
+	      <input class="login-email auth-input" id="email" type="email" placeholder="邮箱" value="demo@example.com" aria-label="邮箱" autocomplete="email" />
+	      <input class="login-password auth-input" id="password" type="password" placeholder="密码" value="demo1234" aria-label="密码" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()" />
+	      <button class="auth-action" onclick="login()">登录</button>
+	      <button class="ghost auth-action" onclick="register()">注册</button>
+	      <button type="button" class="user-entry" id="userEntry" onclick="openProfile()" aria-label="进入我的">
+	        <img class="user-avatar" id="headerAvatar" src="/static/mascot.png" alt="我的头像" />
+	        <span class="user-entry-copy"><strong id="headerUserName">我的</strong><small>账号与订单</small></span>
+	      </button>
 	    </div>
   </div>
 </header>
@@ -265,11 +308,87 @@
   </div>
 </div>
 
-<div class="toast" id="toast"></div>
+<button type="button" class="mobile-ai-dock" id="mobileAiDock" aria-label="问 AI，长按可说话">
+  <svg class="ic" aria-hidden="true"><use href="#i-mic"/></svg><span id="dockLabel">问 AI 或按住说话</span>
+</button>
+
+<section class="app-panel" id="aiPanel" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="aiPanelTitle">
+  <div class="panel-head">
+    <button type="button" class="ghost" onclick="closePanel('aiPanel')" aria-label="返回首页"><svg class="ic"><use href="#i-back"/></svg></button>
+    <div class="panel-title"><img src="/static/mascot.png" alt="猫猫小助手"><div><h2 id="aiPanelTitle">猫猫小助手</h2><p>选设备、问免押、查使用方法，我都陪着你</p></div></div>
+  </div>
+  <div class="ai-panel-body">
+    <div class="msgs" id="aiMsgs" aria-live="polite">
+      <div class="consult-start">
+        <div class="bub a">喵～我是猫猫小助手 🐱 快来咨询我吧</div>
+        <div class="route-grid" aria-label="选择咨询类型">
+          <button type="button" class="route-btn" onclick="send('下单问题咨询')"><span class="route-no">1</span><span>下单问题咨询</span></button>
+          <button type="button" class="route-btn" onclick="send('免押问题咨询')"><span class="route-no">2</span><span>免押问题咨询</span></button>
+          <button type="button" class="route-btn" onclick="send('理赔问题咨询')"><span class="route-no">3</span><span>理赔问题咨询</span></button>
+          <button type="button" class="route-btn" onclick="send('设备选择咨询')"><span class="route-no">4</span><span>设备选择咨询</span></button>
+        </div>
+      </div>
+    </div>
+    <div class="ai-compose">
+      <div class="ai-text-row">
+        <input id="aiChatin" placeholder="输入问题，或按住下方按钮说话" onkeydown="if(event.key==='Enter')send(null,'aiChatin')" aria-label="AI 对话输入" />
+        <button type="button" onclick="send(null,'aiChatin')" aria-label="发送给 AI"><svg class="ic"><use href="#i-send"/></svg></button>
+      </div>
+      <button type="button" class="voice-hold" id="voiceHold" aria-label="按住说话，松开发送"><svg class="ic"><use href="#i-mic"/></svg><span>按住说话</span></button>
+      <div class="voice-status" id="voiceStatus" aria-live="polite">语音由浏览器识别，可能使用浏览器厂商云服务；本站不保存音频</div>
+    </div>
+  </div>
+</section>
+
+<section class="app-panel" id="profilePanel" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="profileTitle">
+  <div class="panel-head">
+    <button type="button" class="ghost" onclick="closePanel('profilePanel')" aria-label="返回首页"><svg class="ic"><use href="#i-back"/></svg></button>
+    <div class="panel-title"><svg class="ic" style="font-size:32px;color:var(--brand)"><use href="#i-user"/></svg><div><h2 id="profileTitle">我的</h2><p>账号资料、密码与订单</p></div></div>
+  </div>
+  <div class="profile-body">
+    <section class="profile-section">
+      <h3>个人资料</h3>
+      <div class="profile-avatar-row">
+        <img class="profile-avatar" id="profileAvatar" src="/static/mascot.png" alt="当前头像" />
+        <div class="profile-avatar-actions">
+          <button type="button" class="ghost sm" onclick="$('avatarFile').click()"><svg class="ic"><use href="#i-image"/></svg>更换头像</button>
+          <button type="button" class="ghost sm" onclick="resetAvatar()">恢复默认</button>
+          <input class="sr-only" id="avatarFile" type="file" accept="image/jpeg,image/png,image/webp" tabindex="-1" aria-hidden="true" onchange="prepareAvatar(event)" />
+        </div>
+      </div>
+      <div class="profile-grid">
+        <div class="field"><label for="profileName">昵称</label><input id="profileName" maxlength="100" autocomplete="name" /></div>
+        <div class="field"><label for="profileEmail">登录邮箱</label><input id="profileEmail" type="email" maxlength="255" autocomplete="email" /></div>
+        <div class="field wide"><label for="profileCurrentPassword">当前密码（修改邮箱时必填）</label><input id="profileCurrentPassword" type="password" maxlength="128" autocomplete="current-password" /></div>
+      </div>
+      <p class="profile-help">头像会在本机压缩后上传；修改登录邮箱需要验证当前密码。</p>
+      <div class="profile-actions"><button type="button" onclick="saveProfile()">保存资料</button></div>
+    </section>
+
+    <section class="profile-section">
+      <h3>修改密码</h3>
+      <div class="profile-grid">
+        <div class="field"><label for="oldPassword">当前密码</label><input id="oldPassword" type="password" maxlength="128" autocomplete="current-password" /></div>
+        <div class="field"><label for="newPassword">新密码（至少 8 位）</label><input id="newPassword" type="password" minlength="8" maxlength="128" autocomplete="new-password" /></div>
+        <div class="field wide"><label for="confirmPassword">再次输入新密码</label><input id="confirmPassword" type="password" minlength="8" maxlength="128" autocomplete="new-password" /></div>
+      </div>
+      <div class="profile-actions"><button type="button" class="ghost" onclick="changePassword()">确认修改密码</button></div>
+    </section>
+
+    <section class="profile-section">
+      <div class="sechead"><h3 style="margin:0">我的订单</h3><div class="sp"></div><button type="button" class="ghost sm" onclick="loadOrders()"><svg class="ic"><use href="#i-refresh"/></svg>刷新</button></div>
+      <div id="myOrders"><span class="muted">正在加载订单…</span></div>
+    </section>
+
+    <button type="button" class="danger" style="width:100%" onclick="logout()"><svg class="ic"><use href="#i-logout"/></svg>退出登录</button>
+  </div>
+</section>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
 const $=id=>document.getElementById(id);
-let USER=JSON.parse(localStorage.getItem('rental_user')||'null'),SESSION=null,CAMS=[],SELCAM=null,CONFIGS=[],SHIPPING_DRAFT={};
+let USER=JSON.parse(localStorage.getItem('rental_user')||'null'),SESSION=null,CAMS=[],SELCAM=null,CONFIGS=[],SHIPPING_DRAFT={},PENDING_AVATAR,PANEL_SCROLL=0;
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function toast(m){const t=$('toast');t.textContent=m;t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2200);}
 function hdrs(json){return json?{'Content-Type':'application/json'}:{};}
@@ -284,10 +403,15 @@ function observeReveal(){document.querySelectorAll('.reveal:not(.in)').forEach(e
 function setUser(d){
   USER=d;localStorage.setItem('rental_user',JSON.stringify(USER));
   const w=$('who');w.className='who on';w.innerHTML='<span class="dot"></span>'+esc(USER.name||USER.email)+' · '+esc(USER.role);
+  $('loginBox').classList.add('signed-in');$('hbar').classList.add('user-on');
+  $('headerAvatar').src=USER.avatar_data||'/static/mascot.png';$('headerUserName').textContent=USER.name||'我的';
+  if(USER.email)$('email').value=USER.email;
 }
 function clearUser(){
   USER=null;localStorage.removeItem('rental_user');
   $('who').className='who';$('who').innerHTML='<span class="dot"></span>未登录';
+  $('loginBox').classList.remove('signed-in');$('hbar').classList.remove('user-on');$('headerAvatar').src='/static/mascot.png';
+  if($('myOrders'))$('myOrders').innerHTML='<span class="muted">登录后查看你的订单</span>';
 }
 async function login(){
   const email=$('email').value.trim();const password=$('password').value;
@@ -303,10 +427,47 @@ async function register(){
     const d=await r.json();if(!r.ok)return toast('注册失败：'+errOf(d));
     setUser(d);toast('注册成功，已登录');loadOrders();}catch(e){toast('注册失败');}
 }
-function restoreUser(){
-  if(!USER)return;
-  const w=$('who');w.className='who on';w.innerHTML='<span class="dot"></span>'+esc(USER.name||USER.email)+' · '+esc(USER.role);
-  if(USER.email)$('email').value=USER.email;
+async function restoreUser(){
+  if(!USER)return;setUser(USER);
+  try{const r=await fetch('/api/auth/me');if(r.ok){setUser(await r.json());loadOrders();}else if(r.status===401)clearUser();}catch(e){}
+}
+async function logout(){
+  try{await fetch('/api/auth/logout',{method:'POST'});}catch(e){}
+  closePanel('profilePanel');clearUser();loadOrders();toast('已退出登录');
+}
+function openPanel(id){
+  document.querySelectorAll('.app-panel.open').forEach(p=>{p.classList.remove('open');p.setAttribute('aria-hidden','true');});
+  PANEL_SCROLL=window.scrollY;const p=$(id);p.classList.add('open');p.setAttribute('aria-hidden','false');document.body.classList.add('panel-open');
+  const focus=p.querySelector('button,input');if(focus)setTimeout(()=>focus.focus({preventScroll:true}),80);
+}
+function closePanel(id){
+  const p=$(id);if(!p||!p.classList.contains('open'))return;p.classList.remove('open');p.setAttribute('aria-hidden','true');document.body.classList.remove('panel-open');window.scrollTo(0,PANEL_SCROLL);
+}
+function openAIPanel(){openPanel('aiPanel');const m=$('aiMsgs');requestAnimationFrame(()=>{m.scrollTop=m.scrollHeight;});}
+async function openProfile(){
+  if(!USER)return toast('请先登录后进入“我的”');
+  openPanel('profilePanel');PENDING_AVATAR=undefined;
+  try{const r=await fetch('/api/auth/me');if(!r.ok)throw new Error();setUser(await r.json());}catch(e){closePanel('profilePanel');clearUser();return toast('登录已失效，请重新登录');}
+  $('profileAvatar').src=USER.avatar_data||'/static/mascot.png';$('profileName').value=USER.name||'';$('profileEmail').value=USER.email||'';$('profileCurrentPassword').value='';loadOrders();
+}
+function resetAvatar(){PENDING_AVATAR='';$('profileAvatar').src='/static/mascot.png';toast('保存资料后恢复默认头像');}
+function prepareAvatar(event){
+  const file=event.target.files&&event.target.files[0];event.target.value='';if(!file)return;
+  if(!/^image\/(jpeg|png|webp)$/.test(file.type)||file.size>5*1024*1024)return toast('请选择 5MB 内的 JPEG、PNG 或 WebP 图片');
+  const reader=new FileReader();reader.onerror=()=>toast('头像读取失败');reader.onload=()=>{const img=new Image();img.onerror=()=>toast('头像图片无法打开');img.onload=()=>{
+    const side=Math.min(img.naturalWidth,img.naturalHeight),sx=(img.naturalWidth-side)/2,sy=(img.naturalHeight-side)/2,canvas=document.createElement('canvas');canvas.width=256;canvas.height=256;
+    const ctx=canvas.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,256,256);ctx.drawImage(img,sx,sy,side,side,0,0,256,256);const data=canvas.toDataURL('image/jpeg',.82);
+    if(data.length>450000)return toast('头像压缩后仍过大，请换一张图片');PENDING_AVATAR=data;$('profileAvatar').src=data;toast('头像已准备，记得保存资料');
+  };img.src=reader.result;};reader.readAsDataURL(file);
+}
+async function saveProfile(){
+  const name=$('profileName').value.trim(),email=$('profileEmail').value.trim();if(!name||!email)return toast('请填写昵称和登录邮箱');
+  const payload={name,email};if(email.toLowerCase()!==(USER.email||'').toLowerCase())payload.current_password=$('profileCurrentPassword').value;if(PENDING_AVATAR!==undefined)payload.avatar_data=PENDING_AVATAR;
+  try{const r=await fetch('/api/auth/me',{method:'PATCH',headers:hdrs(true),body:JSON.stringify(payload)});const d=await r.json();if(!r.ok)return toast('保存失败：'+errOf(d));setUser(d);PENDING_AVATAR=undefined;$('profileCurrentPassword').value='';toast('资料已保存');}catch(e){toast('资料保存失败，请稍后重试');}
+}
+async function changePassword(){
+  const current=$('oldPassword').value,next=$('newPassword').value,confirmValue=$('confirmPassword').value;if(!current||!next||!confirmValue)return toast('请完整填写三个密码字段');if(next.length<8)return toast('新密码至少需要 8 位');if(next!==confirmValue)return toast('两次输入的新密码不一致');
+  try{const r=await fetch('/api/auth/change-password',{method:'POST',headers:hdrs(true),body:JSON.stringify({current_password:current,new_password:next})});const d=await r.json();if(!r.ok)return toast('修改失败：'+errOf(d));$('oldPassword').value='';$('newPassword').value='';$('confirmPassword').value='';toast('密码修改成功');}catch(e){toast('密码修改失败，请稍后重试');}
 }
 async function loadCams(){
   try{const d=await (await fetch('/api/cameras?limit=100')).json();CAMS=d.data;
@@ -388,13 +549,8 @@ async function placeOrder(){
 }
 // 颜色分档: 取消=红, 完结=绿, 其余=黄(进行中)。文案用后端返回的 display_status。
 function stChip(o){const s=o.status;const cls=s==='cancelled'?'no':(s==='completed'?'ok':'warn');return `<span class="chip ${cls}"><span class="d"></span>${esc(o.display_status||s)}</span>`;}
-async function loadOrders(){
-  if(!USER){$('orders').innerHTML='<span class="muted">登录后查看你的订单</span>';return;}
-  const r=await fetch('/api/orders',{headers:hdrs()});
-  if(r.status===401){clearUser();$('orders').innerHTML='<span class="muted">登录已失效，请重新登录</span>';return;}
-  const d=await r.json();const list=d.data||[];
-  if(!list.length){$('orders').innerHTML='<span class="muted">还没有订单，去上面挑一台吧 🛒</span>';return;}
-  $('orders').innerHTML=list.map(o=>`<div class="o">
+function setOrderViews(html){['orders','myOrders'].forEach(id=>{if($(id))$(id).innerHTML=html;});}
+function orderCards(list){return list.map(o=>`<div class="o">
     <div class="top"><span class="oid">${esc(o.order_id)}</span>${stChip(o)}</div>
     <div class="sub tnum">租期 ${esc(o.rental_start)} ~ ${esc(o.rental_end)}　·　应付租金 ¥${fmt(o.total_price)}　·　押金展示 ¥${fmt(o.deposit)}（无需支付）</div>
     ${o.shipping_address?`<div class="sub">收货：${esc(o.shipping_address.receiver_name)} ${esc(o.shipping_address.phone)}<br>${esc(o.shipping_address.full_address)}</div>`:'<div class="sub muted">历史订单未记录收货地址</div>'}
@@ -404,23 +560,34 @@ async function loadOrders(){
       ${o.status==='completed'?`<button class="ghost sm" onclick="submitFeedback('${o.order_id}')">⭐ 评价与分享</button>`:''}
       ${o.status==='pending_payment'?`<button class="danger sm" onclick="cancelOrder('${o.order_id}',${o.version})">取消订单</button>`:''}
     </div>
-  </div>`).join('');
+  </div>`).join('');}
+async function loadOrders(){
+  if(!USER){setOrderViews('<span class="muted">登录后查看你的订单</span>');return;}
+  const r=await fetch('/api/orders',{headers:hdrs()});
+  if(r.status===401){clearUser();setOrderViews('<span class="muted">登录已失效，请重新登录</span>');return;}
+  const d=await r.json();const list=d.data||[];
+  if(!list.length){setOrderViews('<span class="muted">还没有订单，去挑一台喜欢的相机吧</span>');return;}
+  setOrderViews(orderCards(list));
 }
 async function cancelOrder(id,ver){
   if(!confirm('确认取消订单 '+id+'？'))return;
   const r=await fetch(`/api/orders/${id}?version=${ver}`,{method:'DELETE',headers:hdrs()});const d=await r.json();
   if(!r.ok)return toast('取消失败：'+errOf(d));toast('已取消，手续费 ¥'+fmt(d.cancellation_fee));loadOrders();
 }
-function addBub(role,text,intent,acts){
+function makeBubble(role,text,intent,acts){
   const m=document.createElement('div');m.className='bub '+(role==='u'?'u':'a');
   m.innerHTML=(intent?`<div class="intent">意图：${esc(intent)}</div>`:'')+esc(text).replace(/\n/g,'<br>');
   if(acts&&acts.length){const w=document.createElement('div');w.className='acts';
     acts.forEach(a=>{const b=document.createElement('button');b.className='ghost sm';b.textContent=a.label;b.onclick=()=>onAct(a);w.appendChild(b);});m.appendChild(w);}
-  $('msgs').appendChild(m);$('msgs').scrollTop=$('msgs').scrollHeight;
+  return m;
+}
+function addBub(role,text,intent,acts){
+  ['msgs','aiMsgs'].forEach(id=>{const box=$(id);if(!box)return;box.appendChild(makeBubble(role,text,intent,acts));box.scrollTop=box.scrollHeight;});
 }
 async function onAct(a){
   if(a.action==='prefill_order'){
     const p=a.payload||{};if(!p.camera_id||!p.config_id)return toast('下单信息不完整，请重新咨询');
+    closePanel('aiPanel');
     const shipping=p.shipping_address||{};SHIPPING_DRAFT={};
     ['receiver_name','phone','province','city','district','detail_address'].forEach(key=>{if(typeof shipping[key]==='string'&&shipping[key].trim())SHIPPING_DRAFT[key]=shipping[key].trim();});
     await selCam(p.camera_id);$('cfg').value=p.config_id;$('start').value=p.start_date;$('end').value=p.end_date;$('qty').value=p.quantity||1;
@@ -445,6 +612,7 @@ async function showCompanion(id){
     const acts=[];const official=guides.find(g=>g.guide_url);if(official)acts.push({label:'打开官方指南',action:'open_url',payload:{url:official.guide_url}});
     if(ret.outlet_query_url)acts.push({label:'腾讯地图查顺丰网点',action:'open_url',payload:{url:ret.outlet_query_url}});
     addBub('a',text,'全流程陪伴',acts);
+    if($('profilePanel').classList.contains('open')){closePanel('profilePanel');openAIPanel();}
     events.filter(e=>e.status==='unread').forEach(e=>fetch(`/api/orders/${id}/companion/events/${e.id}/read`,{method:'POST'}));
   }catch(e){toast('陪伴信息加载失败');}
 }
@@ -456,14 +624,37 @@ async function submitFeedback(id){
   const body={rating,comment,share_url:share||null,showcase_allowed:!!share&&confirm('是否授权在猫猫头作品社区公开展示该链接？')};
   try{const r=await fetch(`/api/orders/${id}/feedback`,{method:'POST',headers:hdrs(true),body:JSON.stringify(body)});const d=await r.json();if(!r.ok)return toast(errOf(d));toast('谢谢你的评价，猫猫头收到啦 🐾');loadOrders();}catch(e){toast('评价提交失败');}
 }
-async function send(forced){
-  const txt=forced||$('chatin').value.trim();if(!txt)return;if(!forced)$('chatin').value='';addBub('u',txt);
-  const tip=document.createElement('div');tip.className='typing';tip.innerHTML='<span class="spin"></span> 猫猫思考中…';
-  $('msgs').appendChild(tip);$('msgs').scrollTop=$('msgs').scrollHeight;
+async function send(forced,inputId){
+  const input=$(inputId||'chatin'),txt=forced||(input&&input.value.trim());if(!txt)return;
+  if(!forced){$('chatin').value='';$('aiChatin').value='';}addBub('u',txt);
+  const tips=[];['msgs','aiMsgs'].forEach(id=>{const box=$(id);if(!box)return;const tip=document.createElement('div');tip.className='typing';tip.innerHTML='<span class="spin"></span> 猫猫思考中…';box.appendChild(tip);box.scrollTop=box.scrollHeight;tips.push(tip);});
   try{const d=await (await fetch('/api/chat',{method:'POST',headers:hdrs(true),body:JSON.stringify({session_id:SESSION,message:txt})})).json();
-    tip.remove();SESSION=d.session_id;addBub('a',d.ai_response,d.detected_intent+' · '+d.confidence,d.next_actions);
-  }catch(e){tip.remove();addBub('a','哎呀，网络开小差了，再试一次～');}
+    tips.forEach(t=>t.remove());SESSION=d.session_id;addBub('a',d.ai_response,d.detected_intent+' · '+d.confidence,d.next_actions);
+  }catch(e){tips.forEach(t=>t.remove());addBub('a','哎呀，网络开小差了，再试一次～');}
 }
+
+const SpeechRecognitionCtor=window.SpeechRecognition||window.webkitSpeechRecognition;
+let VOICE_REC=null,VOICE_TEXT='',VOICE_FAILED=false,VOICE_WANT_SEND=false,DOCK_TIMER=null,DOCK_LONG=false,DOCK_SUPPRESS=false;
+function voiceUI(active,message){
+  ['voiceHold','mobileAiDock'].forEach(id=>{const el=$(id);if(el)el.classList.toggle('listening',active);});
+  $('voiceHold').querySelector('span').textContent=active?'正在聆听，松开发送':'按住说话';$('dockLabel').textContent=active?'正在聆听…':'问 AI 或按住说话';if(message)$('voiceStatus').textContent=message;
+}
+function startVoice(){
+  openAIPanel();if(VOICE_REC)return;
+  if(!SpeechRecognitionCtor){voiceUI(false,'当前浏览器不支持语音识别，请使用键盘输入');return toast('当前浏览器不支持语音识别');}
+  VOICE_TEXT='';VOICE_FAILED=false;VOICE_WANT_SEND=false;const rec=new SpeechRecognitionCtor();VOICE_REC=rec;rec.lang='zh-CN';rec.continuous=false;rec.interimResults=true;rec.maxAlternatives=1;
+  rec.onstart=()=>voiceUI(true,'正在聆听，松开后发送；本站不保存音频');
+  rec.onresult=event=>{let text='';for(let i=0;i<event.results.length;i++){text+=event.results[i][0].transcript;if(event.results[i].isFinal)VOICE_WANT_SEND=true;}VOICE_TEXT=text.trim();$('aiChatin').value=VOICE_TEXT;};
+  rec.onerror=event=>{VOICE_FAILED=true;const msg=event.error==='not-allowed'?'麦克风权限未开启，请允许后重试':event.error==='no-speech'?'没有识别到声音，请再试一次':'语音识别暂不可用，请使用键盘输入';voiceUI(false,msg);toast(msg);};
+  rec.onend=()=>{const text=VOICE_TEXT.trim(),sendIt=!VOICE_FAILED&&text&&VOICE_WANT_SEND;VOICE_REC=null;voiceUI(false,'语音由浏览器识别，可能使用浏览器厂商云服务；本站不保存音频');if(sendIt)send(null,'aiChatin');};
+  try{rec.start();}catch(e){VOICE_REC=null;voiceUI(false,'语音识别启动失败，请使用键盘输入');toast('语音识别启动失败');}
+}
+function stopVoice(){if(!VOICE_REC)return;VOICE_WANT_SEND=true;try{VOICE_REC.stop();}catch(e){}}
+const voiceHold=$('voiceHold');voiceHold.addEventListener('pointerdown',e=>{e.preventDefault();voiceHold.setPointerCapture?.(e.pointerId);startVoice();});voiceHold.addEventListener('pointerup',e=>{e.preventDefault();stopVoice();});voiceHold.addEventListener('pointercancel',stopVoice);voiceHold.addEventListener('contextmenu',e=>e.preventDefault());
+voiceHold.addEventListener('click',e=>{if(e.detail===0){if(VOICE_REC)stopVoice();else startVoice();}});
+const dock=$('mobileAiDock');dock.addEventListener('pointerdown',e=>{dock.setPointerCapture?.(e.pointerId);DOCK_LONG=false;DOCK_TIMER=setTimeout(()=>{DOCK_LONG=true;startVoice();},350);});dock.addEventListener('pointerup',()=>{clearTimeout(DOCK_TIMER);if(DOCK_LONG){DOCK_SUPPRESS=true;stopVoice();}});dock.addEventListener('pointercancel',()=>{clearTimeout(DOCK_TIMER);if(DOCK_LONG)stopVoice();});dock.addEventListener('click',e=>{if(DOCK_SUPPRESS){DOCK_SUPPRESS=false;e.preventDefault();return;}openAIPanel();});dock.addEventListener('contextmenu',e=>e.preventDefault());
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){const p=document.querySelector('.app-panel.open');if(p)closePanel(p.id);}});document.addEventListener('visibilitychange',()=>{if(document.hidden)stopVoice();});
+if(!SpeechRecognitionCtor)$('voiceStatus').textContent='当前浏览器不支持语音识别，请使用键盘输入';
 restoreUser();loadCams();loadOrders();observeReveal();setInterval(()=>{if(USER)loadOrders();},60000);
 </script>
 </body>

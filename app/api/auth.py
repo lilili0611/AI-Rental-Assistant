@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import re
 import secrets
 from typing import Optional
@@ -14,7 +16,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import STAFF_ROLES
+from app.api.deps import STAFF_ROLES, get_current_user
 from app.config import settings
 from app.core import security
 from app.database import get_db
@@ -57,7 +59,41 @@ def _customer_response(user: User) -> dict:
         "email": user.email,
         "name": user.name,
         "role": user.role,
+        "avatar_data": user.avatar_data,
     }
+
+
+_AVATAR_RE = re.compile(
+    r"^data:image/(?P<kind>jpeg|png|webp);base64,(?P<data>[A-Za-z0-9+/=]+)$"
+)
+_MAX_AVATAR_BYTES = 300 * 1024
+_MAX_AVATAR_DATA_LENGTH = 450_000
+
+
+def _normalize_avatar_data(value: str) -> Optional[str]:
+    value = (value or "").strip()
+    if not value:
+        return None
+    if len(value) > _MAX_AVATAR_DATA_LENGTH:
+        raise ValueError("头像文件过大，请重新选择")
+    match = _AVATAR_RE.fullmatch(value)
+    if not match:
+        raise ValueError("头像仅支持 JPEG、PNG 或 WebP 图片")
+    try:
+        raw = base64.b64decode(match.group("data"), validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("头像图片格式无效") from exc
+    if not raw or len(raw) > _MAX_AVATAR_BYTES:
+        raise ValueError("头像文件过大，请重新选择")
+    kind = match.group("kind")
+    valid_magic = (
+        (kind == "jpeg" and raw.startswith(b"\xff\xd8\xff"))
+        or (kind == "png" and raw.startswith(b"\x89PNG\r\n\x1a\n"))
+        or (kind == "webp" and raw.startswith(b"RIFF") and raw[8:12] == b"WEBP")
+    )
+    if not valid_magic:
+        raise ValueError("头像图片内容与格式不匹配")
+    return value
 
 
 class PhoneLoginRequest(BaseModel):
@@ -89,6 +125,18 @@ class CustomerLoginRequest(BaseModel):
 class StaffLoginRequest(BaseModel):
     phone: str = Field(min_length=4, max_length=20)
     password: str = Field(min_length=1, max_length=128)
+
+
+class CustomerProfileUpdateRequest(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=100)
+    email: Optional[str] = Field(default=None, min_length=5, max_length=255)
+    avatar_data: Optional[str] = Field(default=None, max_length=_MAX_AVATAR_DATA_LENGTH)
+    current_password: Optional[str] = Field(default=None, max_length=128)
+
+
+class CustomerPasswordChangeRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
 
 
 @router.post("/login")
@@ -158,6 +206,95 @@ def register(
 def logout(response: Response):
     """租客退出登录：清除浏览器会话 Cookie。"""
     response.delete_cookie(_CUSTOMER_COOKIE, path="/")
+    return {"ok": True}
+
+
+@router.get("/me")
+def get_profile(user: User = Depends(get_current_user)):
+    """读取当前租客资料，不接受外部 user_id。"""
+    return _customer_response(user)
+
+
+@router.patch("/me")
+def update_profile(
+    body: CustomerProfileUpdateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """更新当前租客昵称、邮箱或头像。邮箱变更需要当前密码。"""
+    changed = False
+    fields = body.model_fields_set
+
+    if "name" in fields:
+        name = (body.name or "").strip()
+        if not name:
+            raise HTTPException(
+                status_code=422,
+                detail={"error": "昵称不能为空", "error_code": "invalid_name"},
+            )
+        user.name = name
+        changed = True
+
+    if "email" in fields:
+        try:
+            email = _normalize_email(body.email or "")
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"error": str(exc), "error_code": "invalid_email"},
+            ) from exc
+        if email != user.email:
+            if not security.verify_password(body.current_password or "", user.password_hash):
+                raise HTTPException(
+                    status_code=401,
+                    detail={"error": "当前密码错误", "error_code": "invalid_credentials"},
+                )
+            existing = db.execute(
+                select(User).where(User.email == email, User.id != user.id)
+            ).scalars().first()
+            if existing:
+                raise HTTPException(
+                    status_code=409,
+                    detail={"error": "该邮箱已被使用", "error_code": "email_exists"},
+                )
+            user.email = email
+            changed = True
+
+    if "avatar_data" in fields:
+        try:
+            user.avatar_data = _normalize_avatar_data(body.avatar_data or "")
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"error": str(exc), "error_code": "invalid_avatar"},
+            ) from exc
+        changed = True
+
+    if changed:
+        db.commit()
+        db.refresh(user)
+    return _customer_response(user)
+
+
+@router.post("/change-password")
+def change_password(
+    body: CustomerPasswordChangeRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """当前密码校验通过后更新为新的加盐哈希。"""
+    if not security.verify_password(body.current_password, user.password_hash):
+        raise HTTPException(
+            status_code=401,
+            detail={"error": "当前密码错误", "error_code": "invalid_credentials"},
+        )
+    if security.verify_password(body.new_password, user.password_hash):
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "新密码不能与当前密码相同", "error_code": "password_unchanged"},
+        )
+    user.password_hash = security.hash_password(body.new_password)
+    db.commit()
     return {"ok": True}
 
 

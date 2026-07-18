@@ -65,6 +65,13 @@ def ensure_runtime_schema() -> None:
     with engine.begin() as conn:
         if "email" not in user_columns:
             conn.execute(text("ALTER TABLE users ADD COLUMN email VARCHAR(255)"))
+        if "avatar_data" not in user_columns:
+            statement = (
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_data TEXT"
+                if engine.dialect.name == "postgresql"
+                else "ALTER TABLE users ADD COLUMN avatar_data TEXT"
+            )
+            conn.execute(text(statement))
 
         if engine.dialect.name == "postgresql":
             conn.execute(

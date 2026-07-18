@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDPKMixin
@@ -27,6 +27,8 @@ class User(Base, UUIDPKMixin, TimestampMixin):
     credit_score: Mapped[int] = mapped_column(Integer, default=100)
     # 🆕 v2.2 后台登录口令哈希(仅 staff/admin 设置, PBKDF2 加盐)
     password_hash: Mapped[Optional[str]] = mapped_column(String(255))
+    # v2.10 租客头像：前端压缩后保存为受限 data URL；未设置时使用默认猫猫头。
+    avatar_data: Mapped[Optional[str]] = mapped_column(Text)
 
     addresses: Mapped[list["UserAddress"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
