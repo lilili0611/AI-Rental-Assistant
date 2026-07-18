@@ -575,6 +575,7 @@ function orderCards(list){return list.map(o=>`<div class="o">
       ${o.status!=='cancelled'?`<button class="ghost sm" onclick="showCompanion('${o.order_id}')">🐾 陪伴服务</button>`:''}
       ${o.status==='completed'?`<button class="ghost sm" onclick="submitFeedback('${o.order_id}')">⭐ 评价与分享</button>`:''}
       ${o.status==='pending_payment'?`<button class="danger sm" onclick="cancelOrder('${o.order_id}',${o.version})">取消订单</button>`:''}
+      ${['cancelled','completed'].includes(o.status)?`<button class="danger sm" onclick="deleteOrderRecord('${o.order_id}',${o.version})" aria-label="删除订单 ${esc(o.order_id)}">删除订单</button>`:''}
     </div>
   </div>`).join('');}
 async function loadOrders(){
@@ -589,6 +590,11 @@ async function cancelOrder(id,ver){
   if(!confirm('确认取消订单 '+id+'？'))return;
   const r=await fetch(`/api/orders/${id}?version=${ver}`,{method:'DELETE',headers:hdrs()});const d=await r.json();
   if(!r.ok)return toast('取消失败：'+errOf(d));toast('已取消，手续费 ¥'+fmt(d.cancellation_fee));loadOrders();
+}
+async function deleteOrderRecord(id,ver){
+  if(!confirm('确认删除订单 '+id+'？\n删除后将不再显示在“我的订单”，且无法自行恢复。'))return;
+  const r=await fetch(`/api/orders/${id}/record?version=${ver}`,{method:'DELETE',headers:hdrs()});const d=await r.json();
+  if(!r.ok)return toast('删除失败：'+errOf(d));toast('订单已删除');loadOrders();
 }
 function makeBubble(role,text,intent,acts){
   const m=document.createElement('div');m.className='bub '+(role==='u'?'u':'a');

@@ -62,6 +62,10 @@ def ensure_runtime_schema() -> None:
         return
 
     user_columns = {col["name"] for col in inspector.get_columns("users")}
+    order_columns = (
+        {col["name"] for col in inspector.get_columns("orders")}
+        if "orders" in tables else set()
+    )
     with engine.begin() as conn:
         if "email" not in user_columns:
             conn.execute(text("ALTER TABLE users ADD COLUMN email VARCHAR(255)"))
@@ -85,6 +89,14 @@ def ensure_runtime_schema() -> None:
         # v2.6 起押金只展示不计入应付。历史订单若仍是「租金+押金」口径,
         # 且能明确识别为旧值, 自动迁到「应付=租金」。
         if "orders" in tables:
+            if "customer_deleted_at" not in order_columns:
+                statement = (
+                    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS "
+                    "customer_deleted_at TIMESTAMP WITHOUT TIME ZONE"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE orders ADD COLUMN customer_deleted_at DATETIME"
+                )
+                conn.execute(text(statement))
             conn.execute(
                 text(
                     "UPDATE orders "

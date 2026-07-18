@@ -650,6 +650,53 @@ def cancel_order(
     return result
 
 
+CUSTOMER_DELETABLE_STATES = {"cancelled", "completed"}
+
+
+def delete_order_for_customer(
+    db: Session,
+    order: Order,
+    operator_id: str,
+    version: Optional[int] = None,
+) -> dict:
+    """从租客订单列表移除终态订单，保留后台、财务与审计数据。"""
+    # DELETE 应具备幂等性：重复请求已经隐藏的订单仍返回成功。
+    if order.customer_deleted_at is not None:
+        return {
+            "order_id": order.id,
+            "deleted": True,
+            "version": order.version,
+        }
+
+    _check_version(order, version)
+    if order.status not in CUSTOMER_DELETABLE_STATES:
+        raise OrderError(
+            "仅已取消或已完结的订单可以删除",
+            code="order_not_deletable",
+        )
+
+    deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    order.customer_deleted_at = deleted_at
+    order.version += 1
+    order.last_modified_by = operator_id
+    _audit(
+        db,
+        order.id,
+        "customer_delete",
+        operator_id,
+        old_value={"customer_deleted_at": None},
+        new_value={"customer_deleted_at": deleted_at.isoformat()},
+        reason="租客从我的订单中删除",
+    )
+    db.commit()
+    db.refresh(order)
+    return {
+        "order_id": order.id,
+        "deleted": True,
+        "version": order.version,
+    }
+
+
 def auto_cancel_stale_orders(
     db: Session,
     now: Optional[datetime] = None,

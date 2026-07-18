@@ -169,7 +169,10 @@ def list_orders(
     user: User = Depends(get_current_user),
 ):
     # 该接口只返回本人订单; 员工查看全部走 /orders/admin
-    stmt = select(Order).where(Order.user_id == user.id)
+    stmt = select(Order).where(
+        Order.user_id == user.id,
+        Order.customer_deleted_at.is_(None),
+    )
     if status:
         stmt = stmt.where(Order.status == status)
     stmt = stmt.order_by(Order.created_at.desc())
@@ -255,6 +258,28 @@ def cancel_order(
         refund_amount=result["refund_amount"],
         cancellation_fee=result["cancellation_fee"],
     )
+
+
+@router.delete("/orders/{order_id}/record")
+def delete_order_record(
+    order_id: str,
+    version: Optional[int] = Query(default=None),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """租客删除终态订单：C 端隐藏，B 端与审计记录保留。"""
+    order = _get_owned_order(db, order_id, user)
+    try:
+        return order_service.delete_order_for_customer(
+            db,
+            order,
+            operator_id=user.id,
+            version=version,
+        )
+    except ConflictError as e:
+        raise HTTPException(409, detail={"error": e.message, "error_code": e.code})
+    except OrderError as e:
+        raise HTTPException(400, detail={"error": e.message, "error_code": e.code})
 
 
 # ============ B 端操作 ============

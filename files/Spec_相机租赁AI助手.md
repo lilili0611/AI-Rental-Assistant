@@ -3,9 +3,9 @@
 | 项目 | 内容 |
 |------|------|
 | 文档类型 | Technical Specification |
-| 版本 | v2.10.4 |
-| 状态 | Phase 1+2 与 v2.1–v2.10 已实现；v2.10.4 补齐全阶段发散问答与知识库+LLM路由 |
-| 配套文档 | 《产品需求文档 (PRD) v2.10.4》 |
+| 版本 | v2.10.5 |
+| 状态 | Phase 1+2 与 v2.1–v2.10 已实现；v2.10.5 增加租客终态订单删除 |
+| 配套文档 | 《产品需求文档 (PRD) v2.10.5》 |
 | 范围 | Phase 1–2 详细规格 + Phase 3–4 接口预留 |
 
 ---
@@ -254,6 +254,7 @@ PostgreSQL + Redis
 | carrier | VARCHAR(50) | NULL | 🆕 v2.1 快递公司(商家手填) |
 | tracking_no | VARCHAR(100) | NULL | 🆕 v2.1 物流单号(商家手填,前端展示) |
 | review_note | VARCHAR(500) | NULL | 🆕 v2.1 审核备注/驳回原因 |
+| customer_deleted_at | DATETIME | NULL | 🆕 v2.10.5 租客侧删除时间；非空时 C 端列表隐藏，B 端保留 |
 
 > 🆕 **v2.1**:`carrier`/`tracking_no` 在发货(`/ship`)时写入,前端只读展示,不对接快递 API。`review_note` 记录审核驳回原因。收款金额仍复用 `paid_amount`/`payment_note`。
 
@@ -656,7 +657,15 @@ Phase 2:维护会话上下文(见第 6 章)。
 
 #### GET /api/orders
 
-查询当前用户订单列表。支持 status、page、limit 筛选。
+查询当前用户订单列表。支持 status、page、limit 筛选；自动排除 `customer_deleted_at IS NOT NULL` 的订单。
+
+#### DELETE /api/orders/{order_id}/record
+
+从当前租客的“我的订单”删除终态订单。仅允许 `cancelled/completed`，仅订单本人可操作，查询参数 `version` 用于乐观锁。
+
+**响应 200：** `{ "order_id": "...", "deleted": true, "version": 3 }`。
+
+该接口只写 `customer_deleted_at`、递增 `version` 并新增 `order_changes.change_type="customer_delete"`；不物理删除订单，不改变 `status`，不触发库存、退款或飞书同步。重复请求幂等成功；进行中订单返回 `order_not_deletable`。
 
 ### 4.6 飞书同步 (Phase 2,内部接口)
 
@@ -1666,3 +1675,31 @@ paused_for_side_question + restart_from_detour -> collecting_dimensions（清除
 - [x] 覆盖截图复现路径、FAQ优先、LLM标记与180字、客服尾句清洗、LLM失败安全降级、连续发散、恢复旧下单、按新问题重选及跨实例恢复；全量 157 项通过。
 - [x] 375×812 本地浏览器验证安全降级、恢复/重选和新疆场景继承；生产浏览器验证 LLM 回答、按钮换行、对话滚动、`scrollWidth=clientWidth=375` 与无自动下单。
 - [x] `bozipaopao.cn/health` 返回 v2.10.4；生产“租佳能A620明后天 → 想要去新疆拍照，推荐哪一款”第二轮为 `guided_sales_side_question`、`answer_source=llm`，展示 AI 标记与两个动作，控制台无错误。
+
+---
+
+## 27. v2.10.5 租客终态订单删除规格
+
+### 27.1 状态与权限
+
+```text
+cancelled / completed + customer_delete -> 原状态不变，customer_deleted_at=UTC now
+其他状态 + customer_delete -> 拒绝（order_not_deletable）
+```
+
+- 触发者必须是订单本人；商家后台列表不按 `customer_deleted_at` 过滤。
+- `DELETE /api/orders/{id}/record?version=n` 使用乐观锁；已隐藏订单重复调用直接返回成功。
+- 删除按钮仅渲染在 `cancelled/completed` 订单卡，并带订单号辅助标签与二次确认。
+
+### 27.2 副作用与同步门
+
+- 写入 `orders.customer_deleted_at`，递增 `orders.version`，记录 `order_changes.customer_delete`。
+- 不删除 `orders/order_items/order_changes`、地址、陪伴事件或评价，不再次释放 occupancy。
+- 不调用 `_sync_to_feishu`；飞书中已同步的业务订单继续保留，方便财务、物流、理赔与审计。
+- C 端 `GET /api/orders` 统一过滤已隐藏订单，因此首页订单区与“我的”中心同步消失。
+
+### 27.3 迁移与测试
+
+- `ensure_runtime_schema()` 在既有 SQLite/PostgreSQL `orders` 表自动补 `customer_deleted_at`；不重复 seed，不清历史数据。
+- 单元测试覆盖允许状态、非法状态、本人权限、列表过滤、审计保留和重复删除幂等；全量 161 项通过。
+- 真实浏览器覆盖创建→取消→手机端删除→两个订单入口同步刷新；375px 视口无横向溢出，控制台无错误。

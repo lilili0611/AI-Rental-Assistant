@@ -79,6 +79,23 @@ function rec(name, ok, detail) {
       rec('取消订单', /已取消/.test(toast), toast);
     } else rec('取消订单', false, '没有可取消按钮');
 
+    // 7b. 已取消订单可在桌面/手机共用订单卡中删除，两个订单入口同步刷新
+    if (newOrder) {
+      const orderCard = page.locator('#orders .o', { hasText: newOrder });
+      const deleteBtn = orderCard.getByRole('button', { name: `删除订单 ${newOrder}` });
+      await page.setViewportSize({ width: 375, height: 812 });
+      await deleteBtn.scrollIntoViewIfNeeded();
+      const deleteBox = await deleteBtn.boundingBox();
+      const mobileFits = !!deleteBox && deleteBox.x >= 0 && deleteBox.x + deleteBox.width <= 375;
+      await deleteBtn.click();
+      await page.waitForFunction((id) => !document.getElementById('orders').innerText.includes(id), newOrder, { timeout: 5000 });
+      const removedEverywhere = await page.evaluate((id) =>
+        !document.getElementById('orders').innerText.includes(id)
+        && !document.getElementById('myOrders').innerText.includes(id), newOrder);
+      rec('双端删除订单', mobileFits && removedEverywhere, `手机按钮不溢出=${mobileFits}，两个入口已移除=${removedEverywhere}`);
+      await page.setViewportSize({ width: 1280, height: 900 });
+    }
+
     // 8. 日期校验(还机日 < 起租日)
     await page.fill('#start', '2026-09-10');
     await page.fill('#end', '2026-09-05');

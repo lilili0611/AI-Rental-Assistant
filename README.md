@@ -1,8 +1,8 @@
 # 相机租赁 AI 助手系统
 
-对接飞书数据、面向客户与内部员工的 AI 租赁管理助手。当前 **v2.10.4** 已支持导购全阶段发散问答：客户临时切换问题时暂停旧流程，优先查询知识库，未命中由 LLM 结合真实在售目录回答，再选择继续原下单或按新需求重选。
+对接飞书数据、面向客户与内部员工的 AI 租赁管理助手。当前 **v2.10.5** 已支持租客在手机端和网页端删除已取消或已完结订单；删除只从租客列表隐藏，后台、财务及审计记录继续保留。
 
-线上地址：[https://bozipaopao.cn/](https://bozipaopao.cn/)（Vercel 托管，当前版本 v2.10.4）。
+线上地址：[https://bozipaopao.cn/](https://bozipaopao.cn/)（Vercel 托管，当前版本 v2.10.5）。
 
 > 配套文档：[PRD](files/PRD_相机租赁AI助手.md) · [Spec](files/Spec_相机租赁AI助手.md)
 
@@ -44,7 +44,7 @@ pip install -r requirements.txt
 # 2. 配置环境变量（可选，不配也能跑）
 cp .env.example .env
 #   填入 DEEPSEEK_API_KEY 即启用意图识别和未知导购问题兜底
-#   留空时 FAQ/业务查询仍可用，无法回答的问题会提示咨询人工
+#   留空时 FAQ/业务查询仍可用，无法回答的问题会提示咨询客服
 
 # 3. 初始化演示数据（建表 + 真实设备目录 + 演示账号）
 python -m scripts.seed_data
@@ -64,7 +64,7 @@ source .venv/bin/activate
 pytest -q
 ```
 
-覆盖 Spec §9/§13–§16/§20–§26 关键路径：按日期库存、价格边界、预留释放、订单状态机、人工收款、收货地址校验与权限、个人信息脱敏、知识库优先、四类咨询路由、LLM 180 字硬上限、多轮导购、全阶段发散问答、确认关系与跨实例恢复、移动端语音降级、用户资料与密码安全、设备/租期/收货信息下单带入、陪伴提醒和安全排障。
+覆盖 Spec §9/§13–§16/§20–§27 关键路径：按日期库存、价格边界、预留释放、订单状态机、人工收款、终态订单删除与审计保留、收货地址校验与权限、个人信息脱敏、知识库优先、四类咨询路由、LLM 180 字硬上限、多轮导购、全阶段发散问答、确认关系与跨实例恢复、移动端语音降级、用户资料与密码安全、设备/租期/收货信息下单带入、陪伴提醒和安全排障。
 
 ## 主要 API
 
@@ -82,6 +82,7 @@ pytest -q
 | GET | `/api/orders` / `/api/orders/{id}` | 查询订单 | 是 |
 | PATCH | `/api/orders/{id}` | 改期（乐观锁）| 是 |
 | DELETE | `/api/orders/{id}` | 取消（按规则算手续费）| 是 |
+| DELETE | `/api/orders/{id}/record` | 从本人列表删除已取消/已完结订单（保留后台审计）| 订单本人 |
 | POST | `/api/orders/{id}/confirm-payment` | **人工确认收款** | staff |
 | POST | `/api/orders/{id}/advance` | 推进状态（审核/发货/签收/归还/完成）| staff |
 | GET | `/api/orders/{id}/companion` | 订单阶段、人工运单、设备指南、归还提醒 | 订单本人 |
@@ -104,7 +105,7 @@ app/
     inventory_service.py   # 🔴 按日期库存算法（核心）
     pricing_service.py     # 价格计算
     reservation_service.py # 预留与释放
-    order_service.py       # 订单状态机/乐观锁/取消/收款
+    order_service.py       # 订单状态机/乐观锁/取消/租客侧删除/收款
     chat_service.py        # 对话编排
     sales_guide.py         # 主动反问、推荐、免押与下单带入
     companion_service.py   # 租中/租后阶段与幂等提醒

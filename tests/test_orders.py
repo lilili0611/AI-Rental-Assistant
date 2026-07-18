@@ -281,6 +281,72 @@ def test_cancel_unpaid_free(db, seeded):
     assert result["cancellation_fee"] == Decimal("0.00")
 
 
+def test_customer_can_hide_cancelled_order_and_audit_is_preserved(db, seeded):
+    order = _create_order(db, seeded)
+    order_service.cancel_order(db, order, operator_id=seeded["user"].id)
+
+    result = order_service.delete_order_for_customer(
+        db,
+        order,
+        operator_id=seeded["user"].id,
+        version=order.version,
+    )
+
+    assert result["deleted"] is True
+    assert db.get(Order, order.id) is not None
+    assert order.customer_deleted_at is not None
+    listed = orders_api.list_orders(
+        status=None, page=1, limit=20, db=db, user=seeded["user"]
+    )
+    assert listed["data"] == []
+    audit = db.execute(
+        select(OrderChange).where(
+            OrderChange.order_id == order.id,
+            OrderChange.change_type == "customer_delete",
+        )
+    ).scalars().one()
+    assert audit.changed_by == seeded["user"].id
+
+
+def test_customer_delete_is_idempotent(db, seeded):
+    order = _create_order(db, seeded)
+    order_service.cancel_order(db, order, operator_id=seeded["user"].id)
+    first = order_service.delete_order_for_customer(
+        db, order, operator_id=seeded["user"].id, version=order.version
+    )
+    second = order_service.delete_order_for_customer(
+        db, order, operator_id=seeded["user"].id, version=1
+    )
+    assert second == first
+
+
+def test_customer_cannot_delete_order_in_progress(db, seeded):
+    order = _create_order(db, seeded)
+    with pytest.raises(OrderError) as exc:
+        order_service.delete_order_for_customer(
+            db, order, operator_id=seeded["user"].id, version=order.version
+        )
+    assert exc.value.code == "order_not_deletable"
+
+
+def test_customer_cannot_delete_another_users_order(db, seeded):
+    order = _create_order(db, seeded)
+    order_service.cancel_order(db, order, operator_id=seeded["user"].id)
+    other = User(phone="13800000009", name="其他客户", role="customer")
+    db.add(other)
+    db.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        orders_api.delete_order_record(
+            order.id,
+            version=order.version,
+            db=db,
+            user=other,
+        )
+
+    assert exc.value.status_code == 403
+
+
 def test_cancel_paid_charges_fee(db, seeded):
     order = _create_order(db, seeded)
     order = order_service.confirm_payment(db, order, Decimal("270"), "ok", seeded["staff"].id)

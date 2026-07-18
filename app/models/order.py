@@ -68,6 +68,8 @@ class Order(Base, TimestampMixin):
     last_modified_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()
     )
+    # 租客删除仅从 C 端订单列表隐藏，商家、财务和审计记录继续保留。
+    customer_deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
     items: Mapped[list["OrderItem"]] = relationship(
         back_populates="order", cascade="all, delete-orphan"

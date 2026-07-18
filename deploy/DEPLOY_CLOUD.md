@@ -60,6 +60,7 @@
 5. Project Settings → Domains 添加 `bozipaopao.cn` 和 `admin.bozipaopao.cn`。
 6. 到域名服务商处配置 DNS：根域名通常指向 Vercel 的 A 记录 `76.76.21.21`，`admin` 子域名通常配置 CNAME 到 Vercel 提示的目标；以 Vercel Domains 页面提示为准。
 7. 验证 `/api/chat` 可连续完成导购反问；登录后验证订单“陪伴服务”。未配置物流提供器时，位置和预计送达必须为空并显示降级说明。
+8. v2.10.5 起服务启动会为既有 `orders` 表自动补 `customer_deleted_at`；部署后验证已取消/已完结订单可从租客列表删除、商家后台记录仍保留。不要重新 seed 生产库。
 
 ## 正式域名规划
 
