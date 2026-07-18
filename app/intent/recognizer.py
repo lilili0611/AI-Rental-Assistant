@@ -160,6 +160,14 @@ def _single_date_result(value: date, message: str) -> dict:
 
 
 def _parse_relative_dates(message: str) -> dict:
+    # 口语连写“明后天”表示明天起、后天还；需在普通单词匹配前处理，
+    # 否则正则只会截出“后天”并误作单日起租日。
+    if "明后天" in message:
+        today = date.today()
+        return {
+            "start_date": (today + timedelta(days=1)).isoformat(),
+            "end_date": (today + timedelta(days=2)).isoformat(),
+        }
     matches = list(_RELATIVE_DATE_PATTERN.finditer(message))
     if not matches:
         return {}

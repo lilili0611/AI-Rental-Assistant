@@ -12,6 +12,7 @@ Phase 2: 维护会话上下文, 合并历史实体, 多轮追踪。
 """
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
@@ -49,6 +50,7 @@ def _empty_session(session_id: str, user_id: Optional[str]) -> dict:
         "context": {},
         "intents": [],
         "sales_journey": {},
+        "checkout_candidate": {},
     }
 
 
@@ -80,6 +82,7 @@ def _restore_session(db: Session, session_id: str, user_id: Optional[str]) -> di
         "context": last_entities,
         "intents": [row.detected_intent for row in rows if row.detected_intent],
         "sales_journey": dict(last_entities.get("sales_journey", {})),
+        "checkout_candidate": dict(last_entities.get("checkout_candidate", {})),
     }
 
 
@@ -99,6 +102,65 @@ def _resolve_configs(db: Session, devices: List[str]) -> List[CameraConfig]:
         .where(or_(*conds))
     )
     return list(db.execute(stmt).scalars().unique().all())
+
+
+_AFFIRMATIVE_REPLIES = {
+    "对", "对的", "是", "是的", "可以", "好", "好的", "行", "就这个", "确认", "下单",
+}
+_NEGATIVE_REPLIES = {"不对", "不是", "不要", "不需要", "换一个", "重新选", "重新选择"}
+
+
+def _relation_reply(message: str) -> Optional[str]:
+    """只匹配完整短句，避免把发散问题中的“可以”误当作确认。"""
+    normalized = re.sub(r"[\s，,。.!！?？~～]+", "", message)
+    if normalized in _AFFIRMATIVE_REPLIES:
+        return "affirmative"
+    if normalized in _NEGATIVE_REPLIES:
+        return "negative"
+    return None
+
+
+def _checkout_action(candidate: dict) -> dict:
+    payload = {
+        key: candidate[key]
+        for key in ("camera_id", "config_id", "start_date", "end_date", "quantity")
+        if key in candidate
+    }
+    if candidate.get("shipping_address"):
+        payload["shipping_address"] = dict(candidate["shipping_address"])
+    return {
+        "type": "button",
+        "label": "下单",
+        "action": "prefill_order",
+        "payload": payload,
+    }
+
+
+def _confirm_checkout_candidate(db: Session, candidate: dict) -> dict:
+    """确认前重新查库存；这里只生成预填动作，不创建订单或预留。"""
+    config = db.get(CameraConfig, candidate.get("config_id"))
+    try:
+        start = date.fromisoformat(candidate["start_date"])
+        end = date.fromisoformat(candidate["end_date"])
+        quantity = int(candidate.get("quantity", 1))
+    except (KeyError, TypeError, ValueError):
+        return {"available": False, "text": "这组下单信息已失效，请重新选择设备和租期。"}
+    if not config or quantity < 1 or end < start:
+        return {"available": False, "text": "这组下单信息已失效，请重新选择设备和租期。"}
+    availability = inventory_service.get_config_availability(db, config, start, end)
+    if availability.min_available_in_range < quantity:
+        return {
+            "available": False,
+            "text": f"刚刚复核时发现「{config.config_name}」这段租期库存不足，请换一台设备或调整日期。",
+        }
+    return {
+        "available": True,
+        "text": (
+            f"已确认：{config.config_name}，{start} 至 {end}，共 {quantity} 台。"
+            "点击“下单”，我会把设备和租期直接带入下单页；姓名、电话和地址未提供时请在下单页填写。"
+        ),
+        "action": _checkout_action(candidate),
+    }
 
 
 # ============ 各意图的处理 ============
@@ -162,11 +224,19 @@ def _handle_deposit_query(db: Session, entities: dict) -> dict:
 
 
 def _handle_inventory_query(db: Session, entities: dict) -> dict:
-    configs = _resolve_configs(db, entities.get("devices", []))
+    devices = entities.get("devices", [])
+    configs = _resolve_configs(db, devices)
+    if devices and not configs:
+        return {"text": "没有找到匹配的设备配置。"}
     dates = _resolve_period(entities)
     if not dates:
         return {"text": "请告诉我租期的起止日期，我来查这段时间是否有货。", "need_more": ["dates"]}
     start, end = dates
+    if end < start:
+        return {"text": "归还日不能早于起租日，请重新告诉我租期。"}
+    quantity = int(entities.get("quantity", 1) or 1)
+    if quantity < 1:
+        return {"text": "租赁数量至少为 1 台，请重新告诉我需要几台。"}
     config_id = configs[0].id if configs else None
     results = inventory_service.query_availability(db, start, end, config_id)
     if not results:
@@ -175,7 +245,20 @@ def _handle_inventory_query(db: Session, entities: dict) -> dict:
     for r in results:
         status = f"可租 {r.min_available_in_range} 台" if r.is_available else "已无货"
         lines.append(f"• {r.config_name}：{status}（共 {r.total_units} 台）")
-    return {"text": "\n".join(lines)}
+    result = {"text": "\n".join(lines)}
+    if configs and results[0].min_available_in_range >= quantity:
+        config = configs[0]
+        candidate = {
+            "camera_id": config.camera_id,
+            "config_id": config.id,
+            "config_name": config.config_name,
+            "start_date": start.isoformat(),
+            "end_date": end.isoformat(),
+            "quantity": quantity,
+        }
+        result["checkout_candidate"] = candidate
+        result["actions"] = [_checkout_action(candidate)]
+    return result
 
 
 def _resolve_period(entities: dict) -> Optional[tuple]:
@@ -243,6 +326,8 @@ def handle_message(
         else None
     )
     sales_journey = session.setdefault("sales_journey", {})
+    checkout_candidate = session.setdefault("checkout_candidate", {})
+    relation_reply = _relation_reply(message) if checkout_candidate else None
     side_question = (
         sales_guide.is_side_question(message, sales_journey)
         if not unreasonable and consultation is None
@@ -255,9 +340,42 @@ def handle_message(
         text = guide.CUSTOMER_SERVICE_RESPONSE
         actions = []
         answer_source = "customer_service"
+    # 2. 简短肯定/否定只关联最近一轮可下单候选，不进入 FAQ、LLM 或未知意图。
+    elif relation_reply == "affirmative":
+        confirmed = _confirm_checkout_candidate(db, checkout_candidate)
+        if confirmed["available"]:
+            text = confirmed["text"]
+            actions = [confirmed["action"]]
+        else:
+            text = confirmed["text"]
+            actions = []
+            session["checkout_candidate"] = {}
+        intent = IntentResult(
+            intent="checkout_confirmed",
+            confidence=1.0,
+            entities={"checkout_candidate": dict(session["checkout_candidate"])},
+            source="workflow",
+        )
+        answer_source = "workflow"
+    elif relation_reply == "negative":
+        session["checkout_candidate"] = {}
+        intent = IntentResult(
+            intent="checkout_rejected",
+            confidence=1.0,
+            entities={"checkout_candidate": {}},
+            source="workflow",
+        )
+        text = "好的，已取消这一选择。请重新告诉我想租的设备和租期，我会重新查库存。"
+        actions = [{
+            "type": "button",
+            "label": "重新选择设备",
+            "action": "guide_choice",
+        }]
+        answer_source = "workflow"
     # 2. 四类一级咨询入口只做确定性导航，不调用 LLM。
     elif consultation:
         session["sales_journey"] = {}
+        session["checkout_candidate"] = {}
         intent = IntentResult(
             intent=consultation["intent"],
             confidence=1.0,
@@ -337,10 +455,25 @@ def handle_message(
                         guided = sales_guide.process(db, message, sales_journey)
                     if not side_question and guided:
                         session["sales_journey"] = guided["journey"]
+                        prefill = next(
+                            (
+                                action for action in guided.get("actions", [])
+                                if action.get("action") == "prefill_order"
+                            ),
+                            None,
+                        )
+                        session["checkout_candidate"] = (
+                            dict(prefill.get("payload", {})) if prefill else {}
+                        )
+                        guided_entities = {"sales_journey": guided["journey"]}
+                        if session["checkout_candidate"]:
+                            guided_entities["checkout_candidate"] = dict(
+                                session["checkout_candidate"]
+                            )
                         intent = IntentResult(
                             intent="guided_sales",
                             confidence=0.95,
-                            entities={"sales_journey": guided["journey"]},
+                            entities=guided_entities,
                             source="workflow",
                         )
                         text = guided["text"]
@@ -384,6 +517,13 @@ def handle_message(
                                 result = handler(db, intent.entities)
                                 text = result["text"]
                                 actions = result.get("actions", [])
+                                if intent.intent == "inventory_query":
+                                    candidate = result.get("checkout_candidate", {})
+                                    session["checkout_candidate"] = candidate
+                                    intent.entities = {
+                                        **intent.entities,
+                                        "checkout_candidate": dict(candidate),
+                                    }
                             else:
                                 text, actions, answer_source = _fallback_or_customer_service(
                                     safe_message, session.get("history", [])
@@ -394,6 +534,14 @@ def handle_message(
         sales_journey["paused"] = True
         actions = sales_guide.append_detour_actions(actions)
         intent.entities = {**intent.entities, "sales_journey": dict(sales_journey)}
+
+    # 让候选跨普通问答与 Vercel 多实例继续存在，直到被明确替换或清除。
+    active_candidate = session.get("checkout_candidate", {})
+    if active_candidate and "checkout_candidate" not in intent.entities:
+        intent.entities = {
+            **intent.entities,
+            "checkout_candidate": dict(active_candidate),
+        }
 
     # 更新会话
     session["round"] = round_no

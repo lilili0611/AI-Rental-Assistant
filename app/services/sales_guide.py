@@ -303,7 +303,7 @@ def _prefill_action(journey: dict) -> dict:
         payload["shipping_address"] = dict(journey["shipping_address"])
     return {
         "type": "button",
-        "label": "带入下单页",
+        "label": "下单",
         "action": "prefill_order",
         "payload": payload,
     }
@@ -484,11 +484,12 @@ def process(db: Session, message: str, journey: dict) -> Optional[dict]:
         return {
             "text": (
                 f"有货：{selected_config.config_name}，租{price.days}天，租金¥{price.rent}，"
-                f"押金参考¥{price.deposit}。是否需要申请免押？"
+                f"押金参考¥{price.deposit}。是否需要申请免押？也可以直接点击“下单”，到下单页核对信息。"
             ),
             "actions": [
                 {"type": "button", "label": "需要免押", "action": "guide_choice"},
                 {"type": "button", "label": "不需要免押", "action": "guide_choice"},
+                _prefill_action(journey),
             ],
             "journey": journey,
         }
@@ -506,7 +507,7 @@ def process(db: Session, message: str, journey: dict) -> Optional[dict]:
         shipping_note = "你还没有提供收货信息，请在下单页自行填写。"
     journey["active"] = False
     return {
-        "text": prefix + "设备、租期和数量已经整理好，点击“带入下单页”即可自动选择产品和日期。" + shipping_note,
+        "text": prefix + "设备、租期和数量已经整理好，点击“下单”即可自动选择产品和日期。" + shipping_note,
         "actions": [_prefill_action(journey)],
         "journey": journey,
     }

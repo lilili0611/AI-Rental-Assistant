@@ -44,6 +44,13 @@ def test_rule_recognizer_extracts_relative_rental_range(monkeypatch):
     assert result.entities["end_date"] == (date.today() + timedelta(days=2)).isoformat()
 
 
+def test_compact_tomorrow_day_after_range_is_not_reduced_to_one_date():
+    result = recognizer.extract_entities("租R10明后天")
+
+    assert result["start_date"] == (date.today() + timedelta(days=1)).isoformat()
+    assert result["end_date"] == (date.today() + timedelta(days=2)).isoformat()
+
+
 def test_relative_single_date_uses_rental_or_return_role():
     assert recognizer.extract_entities("明天租")["start_date"] == (
         date.today() + timedelta(days=1)

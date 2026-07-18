@@ -135,6 +135,10 @@ def test_checkout_collects_and_displays_shipping_address_responsively():
     assert "const shipping=p.shipping_address||{};SHIPPING_DRAFT={}" in customer
     assert "设备、租期和收货信息已带入" in customer
     assert "设备和租期已带入，请在下单页补全收货信息" in customer
+    assert "if(a.action==='prefill_order')" in customer
+    assert "closePanel('aiPanel')" in customer
+    assert "await selCam(p.camera_id)" in customer
+    assert "await checkQuote();$('cfgCard').scrollIntoView" in customer
 
     assert "<th>收货信息</th>" in admin
     assert "o.shipping_address.full_address" in admin

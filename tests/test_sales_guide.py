@@ -51,6 +51,7 @@ def test_guided_sales_reaches_deposit_and_prefill(db, seeded, monkeypatch):
     assert "免押方式（3选1）" in final["ai_response"]
     assert "下单页自行填写" in final["ai_response"]
     assert final["answer_source"] == "workflow"
+    assert final["next_actions"][0]["label"] == "下单"
     assert final["next_actions"][0]["action"] == "prefill_order"
     payload = final["next_actions"][0]["payload"]
     assert payload["config_id"] == seeded["config"].id
@@ -92,6 +93,11 @@ def test_confirmed_device_and_dates_go_directly_to_deposit_then_prefill(
 
     assert first["detected_intent"] == "guided_sales"
     assert "是否需要申请免押" in first["ai_response"]
+    assert [action["label"] for action in first["next_actions"]] == [
+        "需要免押",
+        "不需要免押",
+        "下单",
+    ]
     assert "主要拍什么" not in first["ai_response"]
 
     final = chat_service.handle_message(
@@ -104,6 +110,33 @@ def test_confirmed_device_and_dates_go_directly_to_deposit_then_prefill(
     assert payload["end_date"] == end.isoformat()
     assert "shipping_address" not in payload
     assert "下单页自行填写" in final["ai_response"]
+
+
+def test_compact_device_and_relative_dates_offer_checkout_without_llm(
+    db, seeded, monkeypatch
+):
+    monkeypatch.setattr(guide.llm, "llm_available", lambda: False)
+
+    first = chat_service.handle_message(db, "租R5明后天")
+
+    assert first["detected_intent"] == "guided_sales"
+    assert "是否需要申请免押" in first["ai_response"]
+    checkout = next(
+        action for action in first["next_actions"]
+        if action["action"] == "prefill_order"
+    )
+    assert checkout["label"] == "下单"
+    assert checkout["payload"]["camera_id"] == seeded["camera"].id
+    assert checkout["payload"]["start_date"] == (
+        date.today() + timedelta(days=1)
+    ).isoformat()
+    assert checkout["payload"]["end_date"] == (
+        date.today() + timedelta(days=2)
+    ).isoformat()
+
+    confirmed = chat_service.handle_message(db, "对", session_id=first["session_id"])
+    assert confirmed["detected_intent"] == "checkout_confirmed"
+    assert confirmed["next_actions"][0]["label"] == "下单"
 
 
 def test_shipping_address_is_prefilled_and_raw_pii_is_redacted_across_instances(
