@@ -1703,3 +1703,4 @@ cancelled / completed + customer_delete -> 原状态不变，customer_deleted_at
 - `ensure_runtime_schema()` 在既有 SQLite/PostgreSQL `orders` 表自动补 `customer_deleted_at`；不重复 seed，不清历史数据。
 - 单元测试覆盖允许状态、非法状态、本人权限、列表过滤、审计保留和重复删除幂等；全量 161 项通过。
 - 真实浏览器覆盖创建→取消→手机端删除→两个订单入口同步刷新；375px 视口无横向溢出，控制台无错误。
+- `bozipaopao.cn/health` 返回 v2.10.5；生产测试订单删除后 `GET /api/orders` 不再返回该订单，按订单号读取仍确认原记录及 `cancelled` 状态保留。
