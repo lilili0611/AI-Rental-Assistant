@@ -21,6 +21,18 @@ def _reach_date_step(db, monkeypatch) -> str:
     return sid
 
 
+def _reach_checkout_step(db, seeded, monkeypatch) -> str:
+    monkeypatch.setattr(guide.llm, "llm_available", lambda: False)
+    start = date.today() + timedelta(days=10)
+    end = start + timedelta(days=2)
+    result = chat_service.handle_message(
+        db,
+        f"我要租{seeded['camera'].id}，{start.isoformat()}到{end.isoformat()}",
+    )
+    assert "是否需要申请免押" in result["ai_response"]
+    return result["session_id"]
+
+
 def test_guided_sales_reaches_deposit_and_prefill(db, seeded, monkeypatch):
     monkeypatch.setattr(guide.llm, "llm_available", lambda: False)
 
@@ -250,7 +262,9 @@ def test_natural_travel_rental_wording_starts_guided_sales(db, seeded, monkeypat
     assert "第一次用相机" in result["ai_response"]
 
 
-def test_new_recommendation_does_not_reuse_completed_journey(db, seeded, monkeypatch):
+def test_new_recommendation_pauses_completed_journey_before_reselection(
+    db, seeded, monkeypatch
+):
     monkeypatch.setattr(guide.llm, "llm_available", lambda: False)
     store = get_session_store()
     first = chat_service.handle_message(db, "我想去旅行租相机")
@@ -273,7 +287,17 @@ def test_new_recommendation_does_not_reuse_completed_journey(db, seeded, monkeyp
 
     result = chat_service.handle_message(db, "再给我推荐一台相机", session_id=sid)
 
-    assert "主要拍什么" in result["ai_response"]
+    assert seeded["config"].config_name not in result["ai_response"]
+    assert [action["label"] for action in result["next_actions"]] == [
+        "继续当前下单",
+        "按新需求重新选设备",
+    ]
+    assert store.get(sid)["sales_journey"]["paused"] is True
+
+    restarted = chat_service.handle_message(
+        db, "按新需求重新选设备", session_id=sid
+    )
+    assert "主要拍什么" in restarted["ai_response"]
     assert not store.get(sid)["sales_journey"].get("config_id")
 
 
@@ -307,6 +331,138 @@ def test_side_question_while_waiting_dates_uses_llm_and_preserves_journey(
     journey = get_session_store().get(sid)["sales_journey"]
     assert journey["paused"] is True
     assert journey["config_id"] == before["config_id"] == seeded["config"].id
+
+
+def test_side_question_at_checkout_uses_llm_with_real_catalog_context(
+    db, seeded, monkeypatch
+):
+    sid = _reach_checkout_step(db, seeded, monkeypatch)
+    captured = {}
+    monkeypatch.setattr(guide.llm, "llm_available", lambda: True)
+
+    def answer(messages, **kwargs):
+        captured["messages"] = messages
+        return "新疆旅行建议兼顾广角风景、人物抓拍和便携性。可优先比较轻便机型与可换镜头机型；风沙环境注意使用密封袋收纳，换镜头时避风，最终按画质、重量和预算选择。"
+
+    monkeypatch.setattr(guide.llm, "chat_completion", answer)
+
+    result = chat_service.handle_message(
+        db, "想要去新疆拍照，推荐哪一款", session_id=sid
+    )
+
+    assert result["detected_intent"] == "guided_sales_side_question"
+    assert result["answer_source"] == "llm"
+    assert result["ai_response"].startswith(f"{guide.AI_LABEL}\n")
+    assert "有货" not in result["ai_response"]
+    assert seeded["camera"].name in captured["messages"][0]["content"]
+    assert seeded["config"].config_name in captured["messages"][0]["content"]
+    assert [action["label"] for action in result["next_actions"]] == [
+        "继续当前下单",
+        "按新需求重新选设备",
+    ]
+    journey = get_session_store().get(sid)["sales_journey"]
+    assert journey["paused"] is True
+    assert journey["detour_message"] == "想要去新疆拍照，推荐哪一款"
+
+
+def test_checkout_side_question_still_uses_faq_before_llm(db, seeded, monkeypatch):
+    sid = _reach_checkout_step(db, seeded, monkeypatch)
+    monkeypatch.setattr(guide.llm, "llm_available", lambda: True)
+    monkeypatch.setattr(
+        guide.llm,
+        "chat_completion",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("知识库命中时不应调用 LLM")
+        ),
+    )
+
+    result = chat_service.handle_message(db, "可以开发票吗？", session_id=sid)
+
+    assert result["detected_intent"] == "knowledge_qa"
+    assert result["answer_source"] == "knowledge_base"
+    assert result["ai_response"] == "目前不支持"
+    assert [action["label"] for action in result["next_actions"]] == [
+        "继续当前下单",
+        "按新需求重新选设备",
+    ]
+
+
+def test_checkout_side_question_has_safe_answer_when_llm_is_unavailable(
+    db, seeded, monkeypatch
+):
+    sid = _reach_checkout_step(db, seeded, monkeypatch)
+    monkeypatch.setattr(guide.llm, "llm_available", lambda: False)
+
+    result = chat_service.handle_message(
+        db, "想要去新疆拍照，推荐哪一款", session_id=sid
+    )
+
+    assert result["answer_source"] == "business_data"
+    assert "旅行拍摄建议" in result["ai_response"]
+    assert "请咨询客服" not in result["ai_response"]
+    assert "有货" not in result["ai_response"]
+
+
+def test_checkout_detour_can_resume_old_order_or_restart_from_new_request(
+    db, seeded, monkeypatch
+):
+    sid = _reach_checkout_step(db, seeded, monkeypatch)
+    monkeypatch.setattr(guide.llm, "llm_available", lambda: False)
+    chat_service.handle_message(
+        db, "想要去新疆拍照，推荐哪一款", session_id=sid
+    )
+
+    resumed = chat_service.handle_message(db, "继续当前下单", session_id=sid)
+    assert "是否需要申请免押" in resumed["ai_response"]
+    assert any(action["action"] == "prefill_order" for action in resumed["next_actions"])
+
+    chat_service.handle_message(
+        db, "想要去新疆拍照，推荐哪一款", session_id=sid
+    )
+    restarted = chat_service.handle_message(
+        db, "按新需求重新选设备", session_id=sid
+    )
+    assert "旅行风景" in restarted["ai_response"]
+    assert "第一次用相机" in restarted["ai_response"]
+    journey = get_session_store().get(sid)["sales_journey"]
+    assert journey["scene"] == "travel"
+    assert "start_date" not in journey
+    assert "end_date" not in journey
+    assert get_session_store().get(sid)["checkout_candidate"] == {}
+
+
+def test_paused_side_question_does_not_treat_yes_as_old_checkout_confirmation(
+    db, seeded, monkeypatch
+):
+    sid = _reach_checkout_step(db, seeded, monkeypatch)
+    monkeypatch.setattr(guide.llm, "llm_available", lambda: False)
+    chat_service.handle_message(
+        db, "想要去新疆拍照，推荐哪一款", session_id=sid
+    )
+
+    result = chat_service.handle_message(db, "对", session_id=sid)
+
+    assert result["detected_intent"] != "checkout_confirmed"
+    assert [action["label"] for action in result["next_actions"]] == [
+        "继续当前下单",
+        "按新需求重新选设备",
+    ]
+
+
+def test_checkout_detour_restores_across_instances(db, seeded, monkeypatch):
+    sid = _reach_checkout_step(db, seeded, monkeypatch)
+    monkeypatch.setattr(guide.llm, "llm_available", lambda: False)
+    chat_service.handle_message(
+        db, "想要去新疆拍照，推荐哪一款", session_id=sid
+    )
+    get_session_store().delete(sid)
+
+    restarted = chat_service.handle_message(
+        db, "按新需求重新选设备", session_id=sid
+    )
+
+    assert "第一次用相机" in restarted["ai_response"]
+    assert get_session_store().get(sid)["sales_journey"]["scene"] == "travel"
 
 
 def test_continue_dates_resumes_paused_journey(db, seeded, monkeypatch):

@@ -23,14 +23,20 @@ _START_CUES = (
 
 _CONTINUE_DATES = "继续填写租期"
 _RESTART_SELECTION = "重新选择设备"
+_CONTINUE_CHECKOUT = "继续当前下单"
+_RESTART_FROM_DETOUR = "按新需求重新选设备"
 _SIDE_QUESTION_CUES = (
     "？", "?", "吗", "怎么", "为什么", "是什么", "能不能", "可以",
     "推荐", "对比", "比较", "区别", "参数", "适合", "拍人", "拍妹子",
-    "人物照", "复古人像", "镜头", "相机",
+    "人物照", "复古人像", "镜头", "相机", "拍照", "拍摄", "新疆", "西藏",
+    "草原", "沙漠", "雪山", "海边", "海南", "云南", "川西",
 )
 
 _SCENES = {
-    "travel": ("旅游", "旅行", "川西", "风景", "出游"),
+    "travel": (
+        "旅游", "旅行", "川西", "新疆", "西藏", "云南", "海南", "草原", "沙漠",
+        "雪山", "海边", "风景", "出游",
+    ),
     "portrait": (
         "人像", "拍人", "拍妹子", "人物照", "复古人像", "模特", "写真", "服装", "淘宝",
     ),
@@ -175,29 +181,75 @@ def _awaiting_dates(journey: dict) -> bool:
     )
 
 
-def is_side_question(message: str, journey: dict) -> bool:
-    """等待租期时识别插入的新问题，日期或控制动作仍交给导购状态机。"""
-    if not _awaiting_dates(journey):
+def _checkout_ready(journey: dict) -> bool:
+    return bool(
+        journey.get("config_id")
+        and journey.get("start_date")
+        and journey.get("end_date")
+    )
+
+
+def _is_explicit_selection_change(message: str, entities: dict) -> bool:
+    if not entities.get("devices"):
         return False
-    if _CONTINUE_DATES in message or _RESTART_SELECTION in message:
+    return any(
+        cue in message
+        for cue in ("换成", "改成", "改租", "我要租", "就租", "租这", "选这")
+    )
+
+
+def is_side_question(message: str, journey: dict) -> bool:
+    """在所有导购阶段识别新问题，同时放行原流程的明确答案与控制动作。"""
+    has_journey = bool(journey.get("active") or _checkout_ready(journey))
+    if not has_journey:
+        return False
+    if any(
+        control in message
+        for control in (
+            _CONTINUE_DATES,
+            _RESTART_SELECTION,
+            _CONTINUE_CHECKOUT,
+            _RESTART_FROM_DETOUR,
+        )
+    ):
         return False
     entities = recognizer.extract_entities(message)
+    if extract_shipping_fields(message) or _extract_deposit_choice(message) is not None:
+        return False
     if any(entities.get(key) for key in ("start_date", "end_date", "days")):
         return False
+    if _is_explicit_selection_change(message, entities):
+        return False
+    # 收集基础需求时，场景/经验/偏好就是上一问的答案，而不是发散问题。
+    if not _checkout_ready(journey) and not journey.get("recommended"):
+        if not journey.get("scene") and _extract_scene(message):
+            return False
+        if not journey.get("experience") and _extract_experience(message):
+            return False
+        if not journey.get("priority") and _extract_priority(message):
+            return False
     return bool(journey.get("paused")) or any(cue in message for cue in _SIDE_QUESTION_CUES)
 
 
-def detour_actions() -> list[dict]:
+def detour_actions(journey: Optional[dict] = None) -> list[dict]:
+    if _checkout_ready(journey or {}):
+        return [
+            {"type": "button", "label": _CONTINUE_CHECKOUT, "action": "guide_choice"},
+            {"type": "button", "label": _RESTART_FROM_DETOUR, "action": "guide_choice"},
+        ]
     return [
         {"type": "button", "label": _CONTINUE_DATES, "action": "guide_choice"},
         {"type": "button", "label": _RESTART_SELECTION, "action": "guide_choice"},
     ]
 
 
-def append_detour_actions(actions: list[dict]) -> list[dict]:
+def append_detour_actions(actions: list[dict], journey: Optional[dict] = None) -> list[dict]:
     result = list(actions)
     existing = {action.get("label") for action in result}
-    result.extend(action for action in detour_actions() if action["label"] not in existing)
+    result.extend(
+        action for action in detour_actions(journey)
+        if action["label"] not in existing
+    )
     return result
 
 
@@ -311,11 +363,21 @@ def _prefill_action(journey: dict) -> dict:
 
 def process(db: Session, message: str, journey: dict) -> Optional[dict]:
     """处理一轮导购。未处于导购且无启动信号时返回 None。"""
-    if _RESTART_SELECTION in message:
+    if _RESTART_FROM_DETOUR in message:
+        pending_request = str(journey.get("detour_message", ""))[:500]
+        journey.clear()
+        journey["active"] = True
+        message = pending_request or "帮我重新选择设备"
+    elif _CONTINUE_CHECKOUT in message:
+        journey.pop("paused", None)
+        journey.pop("detour_message", None)
+        journey["active"] = True
+    elif _RESTART_SELECTION in message:
         journey.clear()
         journey["active"] = True
     elif _CONTINUE_DATES in message:
         journey.pop("paused", None)
+        journey.pop("detour_message", None)
     elif "重新推荐" in message:
         journey.clear()
     # 上一轮已完成后，新的推荐请求应开启全新需求收集，避免沿用旧设备和租期。

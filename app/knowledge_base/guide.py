@@ -24,8 +24,14 @@ _SYSTEM_PROMPT = """你是“猫猫头”相机租赁全流程陪伴助手，提
 
 _SIDE_QUESTION_PROMPT = """当前问题是导购流程中的临时发散问题。
 只回答用户当前问题，不继续索要起租日或归还日。
+此前已选设备、日期和免押步骤只是旧导购历史，不得把旧答案重复给用户，也不得把新问题解释成确认旧选择。
 对于审美风格、构图、拍摄技巧、一般设备类型和公开相机型号，应基于通用知识直接给出建议，不要因为缺少租期而拒答。
-通用建议不得表述为本店现货、价格或履约承诺；只有确实需要确认本店库存、价格、赔偿、信用资格或订单状态时才答“请咨询客服”。"""
+通用建议不得表述为本店现货、价格或履约承诺；只有确实需要确认本店库存、价格、赔偿、信用资格或订单状态时才答“请咨询客服”。
+如果当前问题可以用通用知识回答，就直接给出完整建议，不要在建议末尾主动附加“请咨询客服”。"""
+
+_BUSINESS_CONTEXT_PROMPT = """以下是系统从本店数据库读取的真实在售设备参考，只在用户询问选购或场景推荐时使用：
+{context}
+可以比较这些设备的公开定位，但不得据此声称实时有货、承诺价格、押金、物流或履约结果。"""
 
 _UNREASONABLE_PATTERNS = tuple(
     re.compile(pattern, re.IGNORECASE)
@@ -63,8 +69,22 @@ def _clean_body(text: str) -> str:
     body = body.replace(AI_LABEL, "").replace("回答由AI生成", "")
     body = re.sub(r"[`*_#>\[\]]", "", body)
     body = re.sub(r"\s+", "", body)
-    if CUSTOMER_SERVICE_RESPONSE in body or _LEGACY_RESPONSE in body:
-        return CUSTOMER_SERVICE_RESPONSE
+    # 模型有时会先给出完整通用建议，再习惯性追加“具体库存请咨询客服”。
+    # 合理问题保留前面的实质回答；只有客服口径出现在开头或正文过短时才整体降级。
+    service_positions = [
+        position
+        for marker in (CUSTOMER_SERVICE_RESPONSE, _LEGACY_RESPONSE)
+        if (position := body.find(marker)) >= 0
+    ]
+    if service_positions:
+        first_position = min(service_positions)
+        if first_position < 30:
+            return CUSTOMER_SERVICE_RESPONSE
+        prefix = body[:first_position]
+        last_break = max(prefix.rfind(mark) for mark in ("。", "！", "？", ".", "!", "?", "；", ";"))
+        if last_break >= 30:
+            prefix = prefix[:last_break]
+        body = prefix.rstrip("，,；;、。.")
     return body[:MAX_LLM_BODY_LENGTH].rstrip("，,；;、")
 
 
@@ -72,6 +92,7 @@ def generate_answer(
     message: str,
     history: Optional[list[dict]] = None,
     side_question: bool = False,
+    business_context: Optional[str] = None,
 ) -> Optional[str]:
     """生成不含标记的短正文；不可用、失败或需客服确认时返回 None。"""
     if not llm.llm_available():
@@ -80,6 +101,11 @@ def generate_answer(
     system_prompt = _SYSTEM_PROMPT
     if side_question:
         system_prompt = f"{system_prompt}\n\n{_SIDE_QUESTION_PROMPT}"
+    if business_context:
+        system_prompt = (
+            f"{system_prompt}\n\n"
+            f"{_BUSINESS_CONTEXT_PROMPT.format(context=business_context[:2000])}"
+        )
     messages = [{"role": "system", "content": system_prompt}]
     for item in (history or [])[-4:]:
         role = item.get("role")
@@ -89,7 +115,7 @@ def generate_answer(
     messages.append({"role": "user", "content": message})
 
     try:
-        raw = llm.chat_completion(messages, temperature=0.3, timeout=15.0)
+        raw = llm.chat_completion(messages, temperature=0.3, timeout=25.0)
     except Exception:
         return None
 
@@ -101,3 +127,18 @@ def generate_answer(
 
 def mark_ai_generated(body: str) -> str:
     return f"{AI_LABEL}\n{body}"
+
+
+def safe_general_answer(message: str) -> str:
+    """LLM 临时不可用时，为合理发散问题提供不编造业务数据的可继续回答。"""
+    if any(cue in message for cue in ("新疆", "西藏", "旅行", "旅游", "风景", "草原", "沙漠", "雪山", "海边")):
+        return (
+            "旅行拍摄建议同时考虑广角风景、人物抓拍、重量和防风沙。轻便固定镜头机更省事，"
+            "可换镜头机画质与焦段更灵活；先告诉我更重视便携、画质还是预算，我再按在售设备缩小范围。"
+        )
+    if any(cue in message for cue in ("推荐", "哪款", "怎么选", "相机", "镜头", "拍照", "拍摄")):
+        return (
+            "我先按这个新需求回答：选设备主要看拍摄距离、光线、是否需要视频、携带重量和预算。"
+            "你可以补充最常拍的场景及更重视便携还是画质，我会基于当前在售设备继续比较。"
+        )
+    return "我已暂停原来的下单流程。请把这个新问题再具体说明一点，我会先回答它，再由你选择继续原下单或重新选设备。"

@@ -34,6 +34,7 @@ from app.services import (
     sales_guide,
     usage_support,
 )
+from app.services.device_guides import profile_for
 from app.services.session_store import get_session_store
 
 
@@ -102,6 +103,30 @@ def _resolve_configs(db: Session, devices: List[str]) -> List[CameraConfig]:
         .where(or_(*conds))
     )
     return list(db.execute(stmt).scalars().unique().all())
+
+
+def _catalog_advice_context(db: Session) -> str:
+    """给发散 LLM 的只读真实目录，不包含库存、订单或个人信息。"""
+    rows = db.execute(
+        select(Camera, CameraConfig)
+        .join(CameraConfig, CameraConfig.camera_id == Camera.id)
+        .order_by(Camera.id, CameraConfig.config_name)
+    ).all()
+    grouped: dict[str, dict] = {}
+    for camera, config in rows:
+        item = grouped.setdefault(
+            camera.id,
+            {
+                "name": camera.name,
+                "strengths": profile_for(camera.id)["strengths"],
+                "configs": [],
+            },
+        )
+        item["configs"].append(config.config_name)
+    return "\n".join(
+        f"- {item['name']}：{item['strengths']}；配置：{'、'.join(item['configs'])}"
+        for item in grouped.values()
+    )
 
 
 _AFFIRMATIVE_REPLIES = {
@@ -327,7 +352,11 @@ def handle_message(
     )
     sales_journey = session.setdefault("sales_journey", {})
     checkout_candidate = session.setdefault("checkout_candidate", {})
-    relation_reply = _relation_reply(message) if checkout_candidate else None
+    relation_reply = (
+        _relation_reply(message)
+        if checkout_candidate and not sales_journey.get("paused")
+        else None
+    )
     side_question = (
         sales_guide.is_side_question(message, sales_journey)
         if not unreasonable and consultation is None
@@ -439,10 +468,13 @@ def handle_message(
                     text = knowledge_match.entry.answer
                     answer_source = "knowledge_base"
                 else:
-                    # 7. 等待租期时的新问题暂停导购，直接进入 LLM 安全兜底。
+                    # 7. 任一导购阶段的新问题暂停旧流程：知识库已优先检索，未命中再走 LLM。
                     if side_question:
                         text, actions, answer_source = _fallback_or_customer_service(
-                            safe_message, session.get("history", []), side_question=True
+                            safe_message,
+                            session.get("history", []),
+                            side_question=True,
+                            business_context=_catalog_advice_context(db),
                         )
                         intent = IntentResult(
                             intent="guided_sales_side_question",
@@ -532,7 +564,8 @@ def handle_message(
     # 发散问题回答后暂停但保留导购草稿，并提供恢复/重选动作。
     if side_question:
         sales_journey["paused"] = True
-        actions = sales_guide.append_detour_actions(actions)
+        sales_journey["detour_message"] = safe_message[:500]
+        actions = sales_guide.append_detour_actions(actions, sales_journey)
         intent.entities = {**intent.entities, "sales_journey": dict(sales_journey)}
 
     # 让候选跨普通问答与 Vercel 多实例继续存在，直到被明确替换或清除。
@@ -571,10 +604,18 @@ def _fallback_or_customer_service(
     message: str,
     history: list[dict],
     side_question: bool = False,
+    business_context: Optional[str] = None,
 ) -> tuple[str, list[dict], str]:
-    body = guide.generate_answer(message, history, side_question=side_question)
+    body = guide.generate_answer(
+        message,
+        history,
+        side_question=side_question,
+        business_context=business_context,
+    )
     if body:
         return guide.mark_ai_generated(body), [], "llm"
+    if side_question:
+        return guide.safe_general_answer(message), [], "business_data"
     return (
         guide.CUSTOMER_SERVICE_RESPONSE,
         [],

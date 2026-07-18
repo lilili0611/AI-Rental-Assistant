@@ -57,6 +57,19 @@ def test_unknown_reasonable_question_uses_marked_180_char_llm_fallback(db, monke
     assert 0 < len(body) <= guide.MAX_LLM_BODY_LENGTH
 
 
+def test_llm_useful_answer_is_kept_when_model_appends_customer_service_tail():
+    useful = "新疆旅行建议优先考虑广角风景、人物抓拍和携带重量，可比较轻便固定镜头机与可换镜头机。"
+
+    cleaned = guide._clean_body(useful + "具体实时库存请咨询客服。")
+
+    assert cleaned == useful.rstrip("。")
+    assert "请咨询客服" not in cleaned
+
+
+def test_llm_customer_service_only_answer_still_uses_customer_service_policy():
+    assert guide._clean_body("请咨询客服。") == guide.CUSTOMER_SERVICE_RESPONSE
+
+
 def test_unreasonable_request_returns_exact_customer_service_response_without_llm(db, monkeypatch):
     monkeypatch.setattr(
         guide.llm,
