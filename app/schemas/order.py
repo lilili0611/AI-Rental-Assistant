@@ -5,7 +5,7 @@ from datetime import date
 from decimal import Decimal
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class OrderItemIn(BaseModel):
@@ -13,11 +13,38 @@ class OrderItemIn(BaseModel):
     quantity: int = Field(default=1, ge=1)
 
 
+class ShippingAddressIn(BaseModel):
+    receiver_name: str = Field(min_length=2, max_length=100)
+    phone: str = Field(pattern=r"^1[3-9]\d{9}$")
+    province: str = Field(min_length=2, max_length=50)
+    city: str = Field(min_length=2, max_length=50)
+    district: str = Field(min_length=2, max_length=50)
+    detail_address: str = Field(min_length=5, max_length=200)
+
+    @field_validator(
+        "receiver_name", "phone", "province", "city", "district", "detail_address",
+        mode="before",
+    )
+    @classmethod
+    def strip_required_text(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
+class ShippingAddressOut(BaseModel):
+    receiver_name: str
+    phone: str
+    province: str
+    city: str
+    district: str
+    detail_address: str
+    full_address: str
+
+
 class OrderCreateRequest(BaseModel):
     items: List[OrderItemIn] = Field(min_length=1)
     rental_start: date
     rental_end: date
-    delivery_address_id: Optional[str] = None
+    shipping_address: ShippingAddressIn
     reservation_id: Optional[str] = None
 
 
@@ -44,6 +71,7 @@ class OrderOut(BaseModel):
     carrier: Optional[str] = None  # 🆕 v2.1 快递公司
     tracking_no: Optional[str] = None  # 🆕 v2.1 物流单号
     review_note: Optional[str] = None  # 🆕 v2.1 审核驳回原因
+    shipping_address: Optional[ShippingAddressOut] = None
     user_id: Optional[str] = None  # 商家端列表用
     items: List[OrderItemOut] = []
 
@@ -53,6 +81,7 @@ class OrderCreateResponse(BaseModel):
     status: str
     total_price: Decimal
     deposit: Decimal
+    shipping_address: ShippingAddressOut
     payment_instruction: str
     reservation_expires_at: Optional[str] = None
 

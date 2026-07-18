@@ -5,10 +5,15 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from fastapi import HTTPException
+from pydantic import ValidationError
+from sqlalchemy import select
 
+from app.api import orders as orders_api
 from app.models.order import Order, OrderChange
 from app.models.reservation import Reservation
-from app.models.user import User
+from app.models.user import User, UserAddress
+from app.schemas.order import OrderCreateRequest, ShippingAddressIn
 from app.services import order_service, reservation_service
 from app.services.order_service import ConflictError, OrderError
 
@@ -21,6 +26,89 @@ def _create_order(db, seeded, qty=1):
         rental_start=date(2024, 9, 1),
         rental_end=date(2024, 9, 3),
     )
+
+
+def _shipping_address():
+    return {
+        "receiver_name": "张三",
+        "phone": "13800138000",
+        "province": "江西省",
+        "city": "南昌市",
+        "district": "西湖区",
+        "detail_address": "丁公路北88号2栋301",
+    }
+
+
+def test_shipping_address_schema_trims_and_validates_mainland_phone():
+    address = ShippingAddressIn(**{
+        **_shipping_address(),
+        "receiver_name": "  张三  ",
+        "detail_address": "  丁公路北88号2栋301  ",
+    })
+    assert address.receiver_name == "张三"
+    assert address.detail_address == "丁公路北88号2栋301"
+
+    with pytest.raises(ValidationError):
+        ShippingAddressIn(**{**_shipping_address(), "phone": "12345"})
+
+
+def test_order_api_saves_and_returns_shipping_address(db, seeded):
+    body = OrderCreateRequest(
+        items=[{"camera_config_id": seeded["config"].id, "quantity": 1}],
+        rental_start=date(2024, 9, 1),
+        rental_end=date(2024, 9, 3),
+        shipping_address=_shipping_address(),
+    )
+
+    response = orders_api.create_order(body, db=db, user=seeded["user"])
+    order = db.get(Order, response.order_id)
+    address = db.get(UserAddress, order.delivery_address_id)
+
+    assert address.user_id == seeded["user"].id
+    assert address.receiver_name == "张三"
+    assert response.shipping_address.full_address == "江西省南昌市西湖区丁公路北88号2栋301"
+
+    listed = orders_api.list_orders(
+        status=None, page=1, limit=20, db=db, user=seeded["user"]
+    )
+    assert listed["data"][0].shipping_address.phone == "13800138000"
+    assert listed["data"][0].shipping_address.full_address == response.shipping_address.full_address
+
+
+def test_order_api_rolls_back_address_when_order_creation_fails(db, seeded):
+    body = OrderCreateRequest(
+        items=[{"camera_config_id": "missing-config", "quantity": 1}],
+        rental_start=date(2024, 9, 1),
+        rental_end=date(2024, 9, 3),
+        shipping_address=_shipping_address(),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        orders_api.create_order(body, db=db, user=seeded["user"])
+
+    assert exc.value.status_code == 400
+    assert db.execute(select(UserAddress)).scalars().all() == []
+
+
+def test_order_service_rejects_another_users_address(db, seeded):
+    other = User(phone="13800000009", name="其他客户", role="customer")
+    db.add(other)
+    db.flush()
+    address = UserAddress(user_id=other.id, **_shipping_address())
+    db.add(address)
+    db.commit()
+
+    with pytest.raises(OrderError) as exc:
+        order_service.create_order(
+            db,
+            user_id=seeded["user"].id,
+            items=[{"camera_config_id": seeded["config"].id, "quantity": 1}],
+            rental_start=date(2024, 9, 1),
+            rental_end=date(2024, 9, 3),
+            delivery_address_id=address.id,
+        )
+
+    assert exc.value.code == "invalid_delivery_address"
 
 
 def test_create_order_pending_payment(db, seeded):

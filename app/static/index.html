@@ -88,6 +88,16 @@
   .field label{font-size:12px;font-weight:700;color:var(--ink-2)}
   .quote{background:var(--surface-2);border:2px solid var(--line);border-radius:18px;padding:18px;margin-top:16px;display:none}
   .quote.show{display:block;animation:pop .35s var(--bounce)}
+  .shipping-form{margin-top:16px;padding:16px;border:2px solid var(--line-2);border-radius:16px;background:#fff}
+  .shipping-title{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;margin-bottom:12px}
+  .shipping-title strong{font-size:16px;color:var(--ink)}
+  .shipping-title span,.shipping-note{font-size:12px;color:var(--ink-2)}
+  .shipping-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
+  .shipping-grid .shipping-half{grid-column:span 3}
+  .shipping-grid .shipping-third{grid-column:span 2}
+  .shipping-grid .shipping-wide{grid-column:1/-1}
+  .shipping-grid input{width:100%;min-width:0}
+  .shipping-note{margin-top:10px;line-height:1.55}
   .qhead{display:flex;align-items:center;gap:10px;margin-bottom:12px;font-size:16px;font-weight:700}
   .quote table{width:100%;border-collapse:collapse;font-size:14px}
   .quote td{padding:5px 0;color:var(--ink-2)}.quote td:last-child{text-align:right;color:var(--ink);font-weight:700}
@@ -142,6 +152,8 @@
 	    .login .who{grid-column:1/-1;white-space:nowrap}
 	    .login input,.login button{width:100%;min-width:0}
 	    .grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+	    .shipping-grid{grid-template-columns:1fr}
+	    .shipping-grid .shipping-half,.shipping-grid .shipping-third,.shipping-grid .shipping-wide{grid-column:1/-1}
 	    .quote .total .big{font-size:24px}.logo h1{font-size:19px}.route-grid{grid-template-columns:1fr}
 	  }
 </style>
@@ -257,7 +269,7 @@
 
 <script>
 const $=id=>document.getElementById(id);
-let USER=JSON.parse(localStorage.getItem('rental_user')||'null'),SESSION=null,CAMS=[],SELCAM=null,CONFIGS=[];
+let USER=JSON.parse(localStorage.getItem('rental_user')||'null'),SESSION=null,CAMS=[],SELCAM=null,CONFIGS=[],SHIPPING_DRAFT={};
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function toast(m){const t=$('toast');t.textContent=m;t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2200);}
 function hdrs(json){return json?{'Content-Type':'application/json'}:{};}
@@ -331,17 +343,48 @@ async function checkQuote(){
         <tr><td>租金 × ${qty}件</td><td>¥${fmt(rent)}</td></tr>${depRow}
       </table>
       <div class="total"><span class="muted">应付租金${dep>0?'（押金不计入应付）':''}</span><span class="big tnum">¥${fmt(rent)}</span></div>
-      <button style="margin-top:16px;width:100%" ${enough?'':'disabled'} onclick="placeOrder()">${enough?icon('i-check')+'立即下单':'库存不足，无法下单'}</button>`;
+      <div class="shipping-form" aria-label="收货信息">
+        <div class="shipping-title"><strong>收货信息</strong><span>与设备、租期和金额一起提交</span></div>
+        <div class="shipping-grid">
+          <div class="field shipping-half"><label for="receiverName">收货人姓名</label><input id="receiverName" autocomplete="name" maxlength="100" aria-required="true" value="${esc(SHIPPING_DRAFT.receiver_name||'')}" oninput="rememberShipping()"/></div>
+          <div class="field shipping-half"><label for="receiverPhone">手机号码</label><input id="receiverPhone" type="tel" inputmode="numeric" autocomplete="tel" maxlength="11" aria-required="true" placeholder="11位大陆手机号" value="${esc(SHIPPING_DRAFT.phone||'')}" oninput="rememberShipping()"/></div>
+          <div class="field shipping-third"><label for="addressProvince">省</label><input id="addressProvince" autocomplete="address-level1" maxlength="50" aria-required="true" placeholder="如：江西省" value="${esc(SHIPPING_DRAFT.province||'')}" oninput="rememberShipping()"/></div>
+          <div class="field shipping-third"><label for="addressCity">市</label><input id="addressCity" autocomplete="address-level2" maxlength="50" aria-required="true" placeholder="如：南昌市" value="${esc(SHIPPING_DRAFT.city||'')}" oninput="rememberShipping()"/></div>
+          <div class="field shipping-third"><label for="addressDistrict">区/县</label><input id="addressDistrict" autocomplete="address-level3" maxlength="50" aria-required="true" placeholder="如：西湖区" value="${esc(SHIPPING_DRAFT.district||'')}" oninput="rememberShipping()"/></div>
+          <div class="field shipping-wide"><label for="addressDetail">详细地址</label><input id="addressDetail" autocomplete="street-address" maxlength="200" aria-required="true" placeholder="街道、门牌号、楼栋和房间号" value="${esc(SHIPPING_DRAFT.detail_address||'')}" oninput="rememberShipping()"/></div>
+        </div>
+        <div class="shipping-note">请填写收货人姓名、手机号码、省、市、区/县及详细地址；该信息将随本次订单提交，用于商家审核与设备寄送。</div>
+      </div>
+      <button style="margin-top:16px;width:100%" ${enough?'':'disabled'} onclick="placeOrder()">${enough?icon('i-check')+'确认地址并立即下单':'库存不足，无法下单'}</button>`;
     $('quote').classList.add('show');
   }catch(err){toast('查询失败');}finally{btn.disabled=false;btn.textContent='查库存 & 算价格';}
 }
+function rememberShipping(){
+  const pairs={receiver_name:'receiverName',phone:'receiverPhone',province:'addressProvince',city:'addressCity',district:'addressDistrict',detail_address:'addressDetail'};
+  Object.entries(pairs).forEach(([key,id])=>{if($(id))SHIPPING_DRAFT[key]=$(id).value;});
+}
+function shippingError(id,message){const el=$(id);if(el){el.focus();el.scrollIntoView({behavior:'smooth',block:'center'});}toast(message);return null;}
+function collectShippingAddress(){
+  rememberShipping();
+  const address=Object.fromEntries(Object.entries(SHIPPING_DRAFT).map(([key,value])=>[key,String(value||'').trim()]));
+  const required=[['receiver_name','receiverName','请填写收货人姓名'],['phone','receiverPhone','请填写手机号码'],['province','addressProvince','请填写省份'],['city','addressCity','请填写城市'],['district','addressDistrict','请填写区/县'],['detail_address','addressDetail','请填写详细地址']];
+  for(const [key,id,message] of required)if(!address[key])return shippingError(id,message);
+  if(address.receiver_name.length<2)return shippingError('receiverName','收货人姓名至少填写2个字符');
+  if(!/^1[3-9]\d{9}$/.test(address.phone))return shippingError('receiverPhone','请输入正确的11位大陆手机号');
+  for(const [key,id,label] of [['province','addressProvince','省份'],['city','addressCity','城市'],['district','addressDistrict','区/县']])if(address[key].length<2)return shippingError(id,`${label}至少填写2个字符`);
+  if(address.detail_address.length<5)return shippingError('addressDetail','详细地址至少填写5个字符');
+  SHIPPING_DRAFT=address;return address;
+}
 async function placeOrder(){
   if(!USER)return toast('请先在右上角登录');
+  const shippingAddress=collectShippingAddress();if(!shippingAddress)return;
   const cfg=$('cfg').value,s=$('start').value,e=$('end').value,qty=+$('qty').value;
-  const r=await fetch('/api/orders',{method:'POST',headers:hdrs(true),body:JSON.stringify({items:[{camera_config_id:cfg,quantity:qty}],rental_start:s,rental_end:e})});
+  const r=await fetch('/api/orders',{method:'POST',headers:hdrs(true),body:JSON.stringify({items:[{camera_config_id:cfg,quantity:qty}],rental_start:s,rental_end:e,shipping_address:shippingAddress})});
   const d=await r.json();if(!r.ok)return toast('下单失败：'+errOf(d));
   toast('下单成功 🎉 '+d.order_id);clearQuote();loadOrders();
-  addBub('a','你的订单 '+d.order_id+' 已创建（待支付），应付租金 ¥'+fmt(d.total_price)+'，押金展示 ¥'+fmt(d.deposit)+'（无需支付）。\n'+d.payment_instruction);
+  const a=d.shipping_address;
+  addBub('a','你的订单 '+d.order_id+' 已创建（待支付），应付租金 ¥'+fmt(d.total_price)+'，押金展示 ¥'+fmt(d.deposit)+'（无需支付）。\n收货：'+a.receiver_name+' '+a.phone+'\n'+a.full_address+'\n'+d.payment_instruction);
+  SHIPPING_DRAFT={};
 }
 // 颜色分档: 取消=红, 完结=绿, 其余=黄(进行中)。文案用后端返回的 display_status。
 function stChip(o){const s=o.status;const cls=s==='cancelled'?'no':(s==='completed'?'ok':'warn');return `<span class="chip ${cls}"><span class="d"></span>${esc(o.display_status||s)}</span>`;}
@@ -354,6 +397,7 @@ async function loadOrders(){
   $('orders').innerHTML=list.map(o=>`<div class="o">
     <div class="top"><span class="oid">${esc(o.order_id)}</span>${stChip(o)}</div>
     <div class="sub tnum">租期 ${esc(o.rental_start)} ~ ${esc(o.rental_end)}　·　应付租金 ¥${fmt(o.total_price)}　·　押金展示 ¥${fmt(o.deposit)}（无需支付）</div>
+    ${o.shipping_address?`<div class="sub">收货：${esc(o.shipping_address.receiver_name)} ${esc(o.shipping_address.phone)}<br>${esc(o.shipping_address.full_address)}</div>`:'<div class="sub muted">历史订单未记录收货地址</div>'}
     ${o.tracking_no?`<div class="sub tnum">物流：${esc(o.carrier||'')} ${esc(o.tracking_no)}</div>`:''}
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
       ${o.status!=='cancelled'?`<button class="ghost sm" onclick="showCompanion('${o.order_id}')">🐾 陪伴服务</button>`:''}
@@ -378,7 +422,7 @@ async function onAct(a){
   if(a.action==='prefill_order'){
     const p=a.payload||{};if(!p.camera_id||!p.config_id)return toast('下单信息不完整，请重新咨询');
     await selCam(p.camera_id);$('cfg').value=p.config_id;$('start').value=p.start_date;$('end').value=p.end_date;$('qty').value=p.quantity||1;
-    $('cfgCard').scrollIntoView({behavior:'smooth',block:'start'});await checkQuote();toast('已带入设备和租期，请核对后点击立即下单');
+    $('cfgCard').scrollIntoView({behavior:'smooth',block:'start'});await checkQuote();toast('已带入设备和租期，请填写收货地址后确认下单');
   }else if(a.action==='open_url'){
     const url=(a.payload||{}).url||'';
     if(/^https:\/\//.test(url)||/^\/static\/[A-Za-z0-9._/-]+$/.test(url))window.open(url,'_blank','noopener');

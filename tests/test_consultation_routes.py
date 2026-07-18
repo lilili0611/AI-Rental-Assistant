@@ -128,4 +128,5 @@ def test_order_guide_is_deterministic_and_links_to_device_picker(db, monkeypatch
     assert result["detected_intent"] == "order_guide"
     assert result["answer_source"] == "business_data"
     assert "查库存 & 算价格" in result["ai_response"]
+    assert "填写收货人、手机号、省市区和详细地址" in result["ai_response"]
     assert result["next_actions"][0]["action"] == "scroll_order"

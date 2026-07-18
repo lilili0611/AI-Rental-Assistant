@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
+<link rel="icon" type="image/png" href="/static/mascot.png" />
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>猫猫头相机租赁 · 商家后台</title>
@@ -42,6 +43,7 @@
   th,td{text-align:left;padding:11px 10px;border-bottom:1px solid var(--line)}
   th{color:var(--ink-2);font-weight:700;font-size:12.5px;white-space:nowrap}
   td.acts{display:flex;gap:6px;flex-wrap:wrap}
+  td.address-cell{min-width:190px;max-width:240px;white-space:normal;line-height:1.45}
   .oid{font-weight:700}
   .chip{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700}
   .chip .d{width:6px;height:6px;border-radius:50%;background:currentColor}
@@ -82,9 +84,9 @@
     </div>
     <table>
       <thead><tr>
-        <th>订单号</th><th>客户</th><th>租期</th><th>租金/已收/押金</th><th>状态</th><th>物流</th><th>操作</th>
+        <th>订单号</th><th>客户</th><th>租期</th><th>租金/已收/押金</th><th>收货信息</th><th>状态</th><th>物流</th><th>操作</th>
       </tr></thead>
-      <tbody id="rows"><tr><td colspan="7" class="muted">请用员工账号密码登录</td></tr></tbody>
+      <tbody id="rows"><tr><td colspan="8" class="muted">请用员工账号密码登录</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -117,7 +119,7 @@ async function login(){
   }catch(e){toast('登录异常');}
 }
 
-function logout(){TOKEN=null;USER=null;localStorage.removeItem('rental_admin_token');$('who').classList.remove('on');$('whoTxt').textContent='未登录';$('rows').innerHTML='<tr><td colspan="7" class="muted">请用员工账号密码登录</td></tr>';}
+function logout(){TOKEN=null;USER=null;localStorage.removeItem('rental_admin_token');$('who').classList.remove('on');$('whoTxt').textContent='未登录';$('rows').innerHTML='<tr><td colspan="8" class="muted">请用员工账号密码登录</td></tr>';}
 
 function stChip(o){const s=o.status;const cls=s==='cancelled'?'no':(s==='completed'?'ok':'warn');return `<span class="chip ${cls}"><span class="d"></span>${esc(o.display_status||s)}</span>`;}
 
@@ -137,19 +139,20 @@ function actBtns(o){
 }
 
 async function load(){
-  if(!TOKEN){$('rows').innerHTML='<tr><td colspan="7" class="muted">请用员工账号密码登录</td></tr>';return;}
+  if(!TOKEN){$('rows').innerHTML='<tr><td colspan="8" class="muted">请用员工账号密码登录</td></tr>';return;}
   const f=$('filter').value;
   const r=await fetch('/api/orders/admin'+(f?('?status='+f):''),{headers:hdrs()});
   if(r.status===401){logout();toast('登录已失效，请重新登录');return;}
   const d=await r.json();
-  if(!r.ok){$('rows').innerHTML=`<tr><td colspan="7" class="muted">${esc(errOf(d))}</td></tr>`;return;}
+  if(!r.ok){$('rows').innerHTML=`<tr><td colspan="8" class="muted">${esc(errOf(d))}</td></tr>`;return;}
   const list=d.data||[];$('count').textContent=list.length+' 单';
-  if(!list.length){$('rows').innerHTML='<tr><td colspan="7" class="muted">暂无订单</td></tr>';return;}
+  if(!list.length){$('rows').innerHTML='<tr><td colspan="8" class="muted">暂无订单</td></tr>';return;}
   $('rows').innerHTML=list.map(o=>`<tr>
     <td class="oid tnum">${esc(o.order_id)}</td>
     <td class="muted tnum">${esc((o.user_id||'').slice(0,8))}</td>
     <td class="tnum">${esc(o.rental_start)} ~ ${esc(o.rental_end)}</td>
     <td class="tnum">租金 ¥${fmt(o.total_price)} / 已收 ¥${fmt(o.paid_amount)}<br><span class="muted">押金展示 ¥${fmt(o.deposit)}（无需支付）</span></td>
+    <td class="address-cell">${o.shipping_address?`${esc(o.shipping_address.receiver_name)} ${esc(o.shipping_address.phone)}<br>${esc(o.shipping_address.full_address)}`:'<span class="muted">历史订单未记录</span>'}</td>
     <td>${stChip(o)}</td>
     <td class="tnum">${o.tracking_no?(esc(o.carrier||'')+' '+esc(o.tracking_no)):'<span class="muted">—</span>'}</td>
     <td class="acts">${actBtns(o)}</td>

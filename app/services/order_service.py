@@ -21,6 +21,7 @@ from app.models.camera import CameraConfig
 from app.models.inventory import Occupancy
 from app.models.order import Order, OrderChange, OrderItem
 from app.models.reservation import Reservation
+from app.models.user import UserAddress
 from app.services import inventory_service, pricing_service
 from app.services.reservation_service import InventoryError
 
@@ -151,6 +152,13 @@ def create_order(
         raise OrderError("订单至少包含一项设备", code="empty_order")
     if rental_end < rental_start:
         raise OrderError("租期结束日不能早于开始日", code="invalid_period")
+    if delivery_address_id:
+        address = db.get(UserAddress, delivery_address_id)
+        if not address or address.user_id != user_id:
+            raise OrderError(
+                "收货地址不存在或不属于当前用户",
+                code="invalid_delivery_address",
+            )
 
     reservation: Optional[Reservation] = None
     if reservation_id:

@@ -62,3 +62,20 @@ def test_mobile_login_uses_shrinkable_two_column_grid_without_inline_widths():
     assert ".login{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}" in html
     assert ".login .who{grid-column:1/-1;white-space:nowrap}" in html
     assert ".login input,.login button{width:100%;min-width:0}" in html
+
+
+def test_checkout_collects_and_displays_shipping_address_responsively():
+    customer = Path("app/static/index.html").read_text(encoding="utf-8")
+    admin = Path("app/static/admin.html").read_text(encoding="utf-8")
+
+    for label in ("收货人姓名", "手机号码", "省", "市", "区/县", "详细地址"):
+        assert label in customer
+    assert "shipping_address:shippingAddress" in customer
+    assert "collectShippingAddress()" in customer
+    assert "确认地址并立即下单" in customer
+    assert ".shipping-grid{grid-template-columns:1fr}" in customer
+    assert "o.shipping_address.full_address" in customer
+
+    assert "<th>收货信息</th>" in admin
+    assert "o.shipping_address.full_address" in admin
+    assert 'colspan="8"' in admin

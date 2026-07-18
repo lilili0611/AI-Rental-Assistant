@@ -47,6 +47,7 @@ def test_guided_sales_reaches_deposit_and_prefill(db, seeded, monkeypatch):
 
     final = chat_service.handle_message(db, "需要免押", session_id=sid)
     assert "免押方式（3选1）" in final["ai_response"]
+    assert "完整地址" in final["ai_response"]
     assert final["answer_source"] == "workflow"
     assert final["next_actions"][0]["action"] == "prefill_order"
     payload = final["next_actions"][0]["payload"]

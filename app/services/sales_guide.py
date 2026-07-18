@@ -358,7 +358,7 @@ def process(db: Session, message: str, journey: dict) -> Optional[dict]:
         prefix = "好的，按普通押金方式继续。\n"
     journey["active"] = False
     return {
-        "text": prefix + "设备、租期和数量已经整理好，点击“带入下单页”核对库存与价格，再由你确认下单。",
+        "text": prefix + "设备、租期和数量已经整理好，点击“带入下单页”核对库存与价格，填写收货人、手机号和完整地址，再由你确认下单。",
         "actions": [_prefill_action(journey)],
         "journey": journey,
     }

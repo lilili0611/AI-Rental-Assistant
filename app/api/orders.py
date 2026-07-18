@@ -15,7 +15,7 @@ from app.api.deps import get_current_user, get_staff_user
 from app.database import get_db
 from app.models.camera import CameraConfig
 from app.models.order import Order
-from app.models.user import User
+from app.models.user import User, UserAddress
 from app.schemas.order import (
     AcceptRequest,
     CancelResponse,
@@ -28,6 +28,7 @@ from app.schemas.order import (
     RentUpdateRequest,
     ReviewRequest,
     ShipRequest,
+    ShippingAddressOut,
     StatusAdvanceRequest,
 )
 from app.services import order_service
@@ -37,7 +38,29 @@ from app.services.reservation_service import InventoryError
 router = APIRouter(prefix="/api", tags=["orders"])
 
 
-def _order_out(order: Order) -> OrderOut:
+def _shipping_address_out(address: Optional[UserAddress]) -> Optional[ShippingAddressOut]:
+    if not address:
+        return None
+    province = address.province or ""
+    city = address.city or ""
+    district = address.district or ""
+    detail = address.detail_address or ""
+    return ShippingAddressOut(
+        receiver_name=address.receiver_name or "",
+        phone=address.phone or "",
+        province=province,
+        city=city,
+        district=district,
+        detail_address=detail,
+        full_address=f"{province}{city}{district}{detail}",
+    )
+
+
+def _order_out(db: Session, order: Order) -> OrderOut:
+    shipping_address = _shipping_address_out(
+        db.get(UserAddress, order.delivery_address_id)
+        if order.delivery_address_id else None
+    )
     return OrderOut(
         order_id=order.id,
         status=order.status,
@@ -53,6 +76,7 @@ def _order_out(order: Order) -> OrderOut:
         carrier=order.carrier,
         tracking_no=order.tracking_no,
         review_note=order.review_note,
+        shipping_address=shipping_address,
         user_id=order.user_id,
         items=[
             OrderItemOut(
@@ -83,32 +107,54 @@ def create_order(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    shipping = body.shipping_address
+    address = UserAddress(
+        user_id=user.id,
+        address_type="shipping",
+        province=shipping.province,
+        city=shipping.city,
+        district=shipping.district,
+        detail_address=shipping.detail_address,
+        receiver_name=shipping.receiver_name,
+        phone=shipping.phone,
+        is_default=False,
+    )
     try:
+        db.add(address)
+        db.flush()
         order = order_service.create_order(
             db,
             user_id=user.id,
             items=[i.model_dump() for i in body.items],
             rental_start=body.rental_start,
             rental_end=body.rental_end,
-            delivery_address_id=body.delivery_address_id,
+            delivery_address_id=address.id,
             reservation_id=body.reservation_id,
             created_by=user.id,
         )
     except InventoryError as e:
+        db.rollback()
         raise HTTPException(
             422,
             detail={"error": e.message, "error_code": "insufficient_inventory",
                     "details": e.details},
         )
     except OrderError as e:
+        db.rollback()
         raise HTTPException(400, detail={"error": e.message, "error_code": e.code})
+    except Exception:
+        db.rollback()
+        raise
 
     expires = None
+    shipping_out = _shipping_address_out(address)
+    assert shipping_out is not None
     return OrderCreateResponse(
         order_id=order.id,
         status=order.status,
         total_price=order.total_price,
         deposit=order.deposit_amount,
+        shipping_address=shipping_out,
         payment_instruction="请通过线下转账完成支付，并联系客服/财务确认收款。",
         reservation_expires_at=expires,
     )
@@ -128,7 +174,7 @@ def list_orders(
         stmt = stmt.where(Order.status == status)
     stmt = stmt.order_by(Order.created_at.desc())
     rows = db.execute(stmt.offset((page - 1) * limit).limit(limit)).scalars().all()
-    return {"data": [_order_out(o) for o in rows], "page": page, "limit": limit}
+    return {"data": [_order_out(db, o) for o in rows], "page": page, "limit": limit}
 
 
 @router.get("/orders/admin")
@@ -145,7 +191,7 @@ def list_orders_admin(
         stmt = stmt.where(Order.status == status)
     stmt = stmt.order_by(Order.created_at.desc())
     rows = db.execute(stmt.offset((page - 1) * limit).limit(limit)).scalars().all()
-    return {"data": [_order_out(o) for o in rows], "page": page, "limit": limit}
+    return {"data": [_order_out(db, o) for o in rows], "page": page, "limit": limit}
 
 
 @router.get("/orders/{order_id}", response_model=OrderOut)
@@ -154,7 +200,7 @@ def get_order(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    return _order_out(_get_owned_order(db, order_id, user))
+    return _order_out(db, _get_owned_order(db, order_id, user))
 
 
 @router.patch("/orders/{order_id}")
@@ -232,7 +278,7 @@ def confirm_payment(
         raise HTTPException(409, detail={"error": e.message, "error_code": e.code})
     except OrderError as e:
         raise HTTPException(400, detail={"error": e.message, "error_code": e.code})
-    return _order_out(order)
+    return _order_out(db, order)
 
 
 @router.post("/orders/{order_id}/advance", response_model=OrderOut)
@@ -254,7 +300,7 @@ def advance_status(
         raise HTTPException(409, detail={"error": e.message, "error_code": e.code})
     except OrderError as e:
         raise HTTPException(400, detail={"error": e.message, "error_code": e.code})
-    return _order_out(order)
+    return _order_out(db, order)
 
 
 def _fetch_order(db: Session, order_id: str) -> Order:
@@ -289,7 +335,7 @@ def review_order(
         payment_note=body.payment_note,
         review_note=body.review_note, version=body.version,
     ))
-    return _order_out(order)
+    return _order_out(db, order)
 
 
 @router.post("/orders/{order_id}/rent", response_model=OrderOut)
@@ -305,7 +351,7 @@ def update_order_rent(
         db, order, rent_amount=body.rent_amount,
         operator_id=user.id, version=body.version, reason=body.reason,
     ))
-    return _order_out(order)
+    return _order_out(db, order)
 
 
 @router.post("/orders/{order_id}/ship", response_model=OrderOut)
@@ -321,7 +367,7 @@ def ship_order(
         db, order, carrier=body.carrier, tracking_no=body.tracking_no,
         operator_id=user.id, version=body.version,
     ))
-    return _order_out(order)
+    return _order_out(db, order)
 
 
 @router.post("/orders/{order_id}/accept", response_model=OrderOut)
@@ -336,4 +382,4 @@ def accept_order(
     order = _map_order_errors(lambda: order_service.accept_order(
         db, order, operator_id=user.id, version=body.version,
     ))
-    return _order_out(order)
+    return _order_out(db, order)
