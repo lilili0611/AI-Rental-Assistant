@@ -84,6 +84,11 @@ def test_mobile_ai_panel_voice_fallback_and_profile_center_are_present():
     assert "rec.lang='zh-CN'" in html
     assert "当前浏览器不支持语音识别，请使用键盘输入" in html
     assert "本站不保存音频" in html
+    assert 'class="ai-input-shell"' in html
+    assert 'class="voice-mic" id="voiceHold"' in html
+    assert 'aria-label="按住说话，松开发送" aria-pressed="false"' in html
+    assert '.voice-mic{flex:0 0 48px;width:48px;height:48px' in html
+    assert 'class="voice-hold"' not in html
     assert "env(safe-area-inset-bottom)" in html
     assert 'id="profilePanel"' in html
     assert 'id="profileAvatar"' in html

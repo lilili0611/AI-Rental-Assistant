@@ -3,9 +3,9 @@
 | 项目 | 内容 |
 |------|------|
 | 文档类型 | Technical Specification |
-| 版本 | v2.10.5 |
-| 状态 | Phase 1+2 与 v2.1–v2.10 已实现；v2.10.5 增加租客终态订单删除 |
-| 配套文档 | 《产品需求文档 (PRD) v2.10.5》 |
+| 版本 | v2.10.6 |
+| 状态 | Phase 1+2 与 v2.1–v2.10 已实现；v2.10.6 优化手机端麦克风输入布局 |
+| 配套文档 | 《产品需求文档 (PRD) v2.10.6》 |
 | 范围 | Phase 1–2 详细规格 + Phase 3–4 接口预留 |
 
 ---
@@ -1704,3 +1704,24 @@ cancelled / completed + customer_delete -> 原状态不变，customer_deleted_at
 - 单元测试覆盖允许状态、非法状态、本人权限、列表过滤、审计保留和重复删除幂等；全量 161 项通过。
 - 真实浏览器覆盖创建→取消→手机端删除→两个订单入口同步刷新；375px 视口无横向溢出，控制台无错误。
 - `bozipaopao.cn/health` 返回 v2.10.5；生产测试订单删除后 `GET /api/orders` 不再返回该订单，按订单号读取仍确认原记录及 `cancelled` 状态保留。
+
+---
+
+## 28. v2.10.6 手机端输入框内麦克风规格
+
+### 28.1 DOM 与布局
+
+- `.ai-text-row` 由 `.ai-input-shell + .ai-send` 构成；shell 内按视觉顺序放置 `#aiChatin` 与 `#voiceHold`。
+- `.ai-input-shell` 高 52px、弹性占满剩余宽度；`#voiceHold.voice-mic` 为 48×48px，`button.ai-send` 为 52×52px，间距 8px。
+- 输入框自身移除重复边框，焦点样式由 `.ai-input-shell:focus-within` 统一提供；麦克风使用现有 `#i-mic` SVG，不使用平台差异较大的 emoji。
+
+### 28.2 交互与无障碍
+
+- 保留 pointerdown → `startVoice()`、pointerup/pointercancel → `stopVoice()`；移动端悬浮入口的短按打开、长按说话逻辑不变。
+- `voiceUI()` 同步 `.listening`、`aria-label`、`aria-pressed` 和隐藏文本；识别中标签为“正在聆听，松开发送”。
+- 不支持 Web Speech、权限未开启、无语音或识别失败时，继续在 `#voiceStatus` 与 toast 提供键盘恢复路径；不改变“不保存音频”的隐私口径。
+
+### 28.3 测试
+
+- 静态测试锁定输入 shell、图标按钮、48px 触控区、无旧版整行 `.voice-hold`，并保留语音降级与视口测试。
+- 全量 161 项通过；375×812 Chromium 实测麦克风位于输入框右侧、发送按钮位于最右侧，页面无横向溢出、键盘发送成功、控制台无错误。
