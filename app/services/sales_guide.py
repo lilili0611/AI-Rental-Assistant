@@ -19,9 +19,19 @@ _START_CUES = (
     "拍人像", "拍视频", "拍照", "旅游", "旅行", "演唱会", "年会", "宠物",
 )
 
+_CONTINUE_DATES = "继续填写租期"
+_RESTART_SELECTION = "重新选择设备"
+_SIDE_QUESTION_CUES = (
+    "？", "?", "吗", "怎么", "为什么", "是什么", "能不能", "可以",
+    "推荐", "对比", "比较", "区别", "参数", "适合", "拍人", "拍妹子",
+    "人物照", "复古人像", "镜头", "相机",
+)
+
 _SCENES = {
     "travel": ("旅游", "旅行", "川西", "风景", "出游"),
-    "portrait": ("人像", "模特", "写真", "服装", "淘宝"),
+    "portrait": (
+        "人像", "拍人", "拍妹子", "人物照", "复古人像", "模特", "写真", "服装", "淘宝",
+    ),
     "concert": ("演唱会", "舞台", "内场"),
     "video": ("视频", "vlog", "短视频", "走拍", "直播"),
     "event": ("年会", "活动", "会议", "公司记录"),
@@ -53,6 +63,40 @@ _SCENE_CAMERA_IDS = {
 def should_start(message: str) -> bool:
     lower = message.lower()
     return any(cue in lower for cue in _START_CUES)
+
+
+def _awaiting_dates(journey: dict) -> bool:
+    return bool(
+        journey.get("active")
+        and journey.get("recommended")
+        and (not journey.get("start_date") or not journey.get("end_date"))
+    )
+
+
+def is_side_question(message: str, journey: dict) -> bool:
+    """等待租期时识别插入的新问题，日期或控制动作仍交给导购状态机。"""
+    if not _awaiting_dates(journey):
+        return False
+    if _CONTINUE_DATES in message or _RESTART_SELECTION in message:
+        return False
+    entities = recognizer.extract_entities(message)
+    if any(entities.get(key) for key in ("start_date", "end_date", "days")):
+        return False
+    return bool(journey.get("paused")) or any(cue in message for cue in _SIDE_QUESTION_CUES)
+
+
+def detour_actions() -> list[dict]:
+    return [
+        {"type": "button", "label": _CONTINUE_DATES, "action": "guide_choice"},
+        {"type": "button", "label": _RESTART_SELECTION, "action": "guide_choice"},
+    ]
+
+
+def append_detour_actions(actions: list[dict]) -> list[dict]:
+    result = list(actions)
+    existing = {action.get("label") for action in result}
+    result.extend(action for action in detour_actions() if action["label"] not in existing)
+    return result
 
 
 def _extract_scene(message: str) -> Optional[str]:
@@ -162,7 +206,12 @@ def _prefill_action(journey: dict) -> dict:
 
 def process(db: Session, message: str, journey: dict) -> Optional[dict]:
     """处理一轮导购。未处于导购且无启动信号时返回 None。"""
-    if "重新推荐" in message:
+    if _RESTART_SELECTION in message:
+        journey.clear()
+        journey["active"] = True
+    elif _CONTINUE_DATES in message:
+        journey.pop("paused", None)
+    elif "重新推荐" in message:
         journey.clear()
     # 上一轮已完成后，新的推荐请求应开启全新需求收集，避免沿用旧设备和租期。
     elif not journey.get("active") and journey.get("config_id") and should_start(message):
@@ -183,6 +232,8 @@ def process(db: Session, message: str, journey: dict) -> Optional[dict]:
     priority = _extract_priority(message)
     deposit_choice = _extract_deposit_choice(message)
     entities = recognizer.extract_entities(message)
+    if any(entities.get(key) for key in ("start_date", "end_date", "days")):
+        journey.pop("paused", None)
     if scene:
         journey["scene"] = scene
     if experience:

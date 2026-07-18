@@ -3,9 +3,20 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
+import pytest
+
 from app.knowledge_base import guide
 from app.services import chat_service
 from app.services.session_store import get_session_store
+
+
+def _reach_date_step(db, monkeypatch) -> str:
+    monkeypatch.setattr(guide.llm, "llm_available", lambda: False)
+    first = chat_service.handle_message(db, "我想租相机，去旅行")
+    sid = first["session_id"]
+    chat_service.handle_message(db, "第一次用相机", session_id=sid)
+    chat_service.handle_message(db, "轻便和画质均衡", session_id=sid)
+    return sid
 
 
 def test_guided_sales_reaches_deposit_and_prefill(db, seeded, monkeypatch):
@@ -102,3 +113,136 @@ def test_new_recommendation_does_not_reuse_completed_journey(db, seeded, monkeyp
 
     assert "主要拍什么" in result["ai_response"]
     assert not store.get(sid)["sales_journey"].get("config_id")
+
+
+def test_side_question_while_waiting_dates_uses_llm_and_preserves_journey(
+    db, seeded, monkeypatch
+):
+    sid = _reach_date_step(db, monkeypatch)
+    before = dict(get_session_store().get(sid)["sales_journey"])
+    monkeypatch.setattr(guide.llm, "llm_available", lambda: True)
+    monkeypatch.setattr(
+        guide.llm,
+        "chat_completion",
+        lambda *args, **kwargs: "想拍复古人像，可优先选择带胶片模拟或色彩直出的轻便相机，再搭配大光圈镜头营造柔和背景虚化。",
+    )
+
+    result = chat_service.handle_message(
+        db, "你可以给我推荐一个拍人很复古的相机吗", session_id=sid
+    )
+
+    assert result["detected_intent"] == "guided_sales_side_question"
+    assert result["answer_source"] == "llm"
+    assert result["ai_response"].startswith(f"{guide.AI_LABEL}\n")
+    assert [action["label"] for action in result["next_actions"]] == [
+        "继续填写租期",
+        "重新选择设备",
+    ]
+    journey = get_session_store().get(sid)["sales_journey"]
+    assert journey["paused"] is True
+    assert journey["config_id"] == before["config_id"] == seeded["config"].id
+
+
+def test_continue_dates_resumes_paused_journey(db, seeded, monkeypatch):
+    sid = _reach_date_step(db, monkeypatch)
+    monkeypatch.setattr(guide.llm, "llm_available", lambda: True)
+    monkeypatch.setattr(
+        guide.llm,
+        "chat_completion",
+        lambda *args, **kwargs: "可以选择轻便机身搭配大光圈镜头。",
+    )
+    chat_service.handle_message(db, "还有什么复古人像拍摄技巧吗？", session_id=sid)
+
+    resumed = chat_service.handle_message(db, "继续填写租期", session_id=sid)
+
+    assert resumed["detected_intent"] == "guided_sales"
+    assert "起租日和归还日" in resumed["ai_response"]
+    journey = get_session_store().get(sid)["sales_journey"]
+    assert journey.get("paused") is None
+    assert journey["config_id"] == seeded["config"].id
+
+
+def test_restart_selection_clears_paused_journey(db, seeded, monkeypatch):
+    sid = _reach_date_step(db, monkeypatch)
+    monkeypatch.setattr(guide.llm, "llm_available", lambda: True)
+    monkeypatch.setattr(
+        guide.llm,
+        "chat_completion",
+        lambda *args, **kwargs: "可以选择轻便机身搭配大光圈镜头。",
+    )
+    chat_service.handle_message(db, "还有什么复古人像拍摄技巧吗？", session_id=sid)
+
+    restarted = chat_service.handle_message(db, "重新选择设备", session_id=sid)
+
+    assert restarted["detected_intent"] == "guided_sales"
+    assert "主要拍什么" in restarted["ai_response"]
+    journey = get_session_store().get(sid)["sales_journey"]
+    assert "config_id" not in journey
+    assert "recommended" not in journey
+
+
+def test_faq_side_question_keeps_journey_and_does_not_call_llm(
+    db, seeded, monkeypatch
+):
+    sid = _reach_date_step(db, monkeypatch)
+    monkeypatch.setattr(guide.llm, "llm_available", lambda: True)
+    monkeypatch.setattr(
+        guide.llm,
+        "chat_completion",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("FAQ 命中不应调用 LLM")
+        ),
+    )
+
+    result = chat_service.handle_message(db, "可以开发票吗？", session_id=sid)
+
+    assert result["detected_intent"] == "knowledge_qa"
+    assert result["answer_source"] == "knowledge_base"
+    assert result["ai_response"] == "目前不支持"
+    assert len(result["next_actions"]) == 2
+    assert get_session_store().get(sid)["sales_journey"]["paused"] is True
+
+
+def test_partial_date_answer_does_not_trigger_llm(db, seeded, monkeypatch):
+    sid = _reach_date_step(db, monkeypatch)
+    monkeypatch.setattr(guide.llm, "llm_available", lambda: True)
+    monkeypatch.setattr(
+        guide.llm,
+        "chat_completion",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("日期回答不应调用 LLM")),
+    )
+
+    result = chat_service.handle_message(db, "7月20日开始", session_id=sid)
+
+    assert result["detected_intent"] == "guided_sales"
+    assert result["answer_source"] == "workflow"
+    assert "起租日和归还日" in result["ai_response"]
+
+
+def test_paused_journey_restores_from_database(db, seeded, monkeypatch):
+    sid = _reach_date_step(db, monkeypatch)
+    monkeypatch.setattr(guide.llm, "llm_available", lambda: True)
+    monkeypatch.setattr(
+        guide.llm,
+        "chat_completion",
+        lambda *args, **kwargs: "可以选择轻便机身搭配大光圈镜头。",
+    )
+    chat_service.handle_message(db, "还有什么复古人像拍摄技巧吗？", session_id=sid)
+    get_session_store().delete(sid)
+
+    restored = chat_service.handle_message(db, "继续填写租期", session_id=sid)
+
+    assert restored["detected_intent"] == "guided_sales"
+    assert "起租日和归还日" in restored["ai_response"]
+    assert (
+        get_session_store().get(sid)["sales_journey"]["config_id"]
+        == seeded["config"].id
+    )
+
+
+@pytest.mark.parametrize("wording", ("拍人", "拍妹子", "人物照", "复古人像"))
+def test_portrait_synonyms_are_recognized_before_daily_scene(db, seeded, wording):
+    result = chat_service.handle_message(db, f"给我推荐{wording}相机")
+
+    assert result["detected_intent"] == "guided_sales"
+    assert "主要拍人像写真" in result["ai_response"]

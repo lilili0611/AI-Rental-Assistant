@@ -241,6 +241,12 @@ def handle_message(
         if not unreasonable and consultation is None
         else None
     )
+    sales_journey = session.setdefault("sales_journey", {})
+    side_question = (
+        sales_guide.is_side_question(message, sales_journey)
+        if not unreasonable and consultation is None
+        else False
+    )
 
     # 1. 不合理请求优先拦截，不进入知识库或 LLM，也不提供转接动作。
     if unreasonable:
@@ -314,11 +320,21 @@ def handle_message(
                     text = knowledge_match.entry.answer
                     answer_source = "knowledge_base"
                 else:
-                    # 7. 知识库未覆盖的选购需求进入主动导购，每轮只反问一个信息。
-                    guided = sales_guide.process(
-                        db, message, session.setdefault("sales_journey", {})
-                    )
-                    if guided:
+                    # 7. 等待租期时的新问题暂停导购，直接进入 LLM 安全兜底。
+                    if side_question:
+                        text, actions, answer_source = _fallback_or_customer_service(
+                            message, session.get("history", [])
+                        )
+                        intent = IntentResult(
+                            intent="guided_sales_side_question",
+                            confidence=0.95,
+                            entities={},
+                            source=answer_source,
+                        )
+                    else:
+                        # 8. 知识库未覆盖的选购需求进入主动导购，每轮只反问一个信息。
+                        guided = sales_guide.process(db, message, sales_journey)
+                    if not side_question and guided:
                         session["sales_journey"] = guided["journey"]
                         intent = IntentResult(
                             intent="guided_sales",
@@ -329,8 +345,8 @@ def handle_message(
                         text = guided["text"]
                         actions = guided.get("actions", [])
                         answer_source = "workflow"
-                    else:
-                        # 8. 设备、实时库存、价格与订单继续走结构化业务能力。
+                    elif not side_question:
+                        # 9. 设备、实时库存、价格与订单继续走结构化业务能力。
                         intent = recognizer.recognize(message)
                         if multi_turn:
                             merged = {
@@ -371,6 +387,12 @@ def handle_message(
                                 text, actions, answer_source = _fallback_or_customer_service(
                                     message, session.get("history", [])
                                 )
+
+    # 发散问题回答后暂停但保留导购草稿，并提供恢复/重选动作。
+    if side_question:
+        sales_journey["paused"] = True
+        actions = sales_guide.append_detour_actions(actions)
+        intent.entities = {**intent.entities, "sales_journey": dict(sales_journey)}
 
     # 更新会话
     session["round"] = round_no
