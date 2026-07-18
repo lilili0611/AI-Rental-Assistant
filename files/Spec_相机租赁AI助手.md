@@ -3,9 +3,9 @@
 | 项目 | 内容 |
 |------|------|
 | 文档类型 | Technical Specification |
-| 版本 | v2.10.2 |
-| 状态 | Phase 1+2 与 v2.1–v2.10 已实现；v2.10.2 修复 AI 键盘收起穿模并扩展自然语言租期识别 |
-| 配套文档 | 《产品需求文档 (PRD) v2.10.2》 |
+| 版本 | v2.10.3 |
+| 状态 | Phase 1+2 与 v2.1–v2.10 已实现；v2.10.3 补齐库存确认关系与一键下单入口 |
+| 配套文档 | 《产品需求文档 (PRD) v2.10.3》 |
 | 范围 | Phase 1–2 详细规格 + Phase 3–4 接口预留 |
 
 ---
@@ -1559,3 +1559,54 @@ waiting_end_date + duration_days       → inventory_checked
 - [x] 导购集成测试覆盖“明天租，后天还”、分两轮补充起止日、已知起租日+天数和斜杠日期区间。
 - [x] 静态页面测试锁定 60/80/90 层级、分阶段视口收敛和不禁用缩放。
 - [x] 375×812 生产页在键盘模拟 500px 后恢复 812px，`scrollWidth=clientWidth=375`、输入焦点已清除；遮罩 z-index=80、首页按钮=60、AI 层=90。`GET /health` 返回 v2.10.2；生产 `/api/chat` 对“明天租，后天还”返回两天报价，对 `7/20~7/23` 返回四天报价并进入免押选择。
+
+---
+
+## 25. v2.10.3 库存候选确认与下单跳转规格
+
+### 25.1 会话状态
+
+会话新增 `checkout_candidate`：
+
+```json
+{
+  "camera_id": "R10",
+  "config_id": "配置主键",
+  "config_name": "佳能R10",
+  "start_date": "2026-07-19",
+  "end_date": "2026-07-20",
+  "quantity": 1
+}
+```
+
+状态转换：
+
+```text
+idle + 唯一设备/完整租期/库存充足 -> checkout_candidate_ready
+checkout_candidate_ready + 肯定答复 -> checkout_ready（保留同一候选并返回下单动作）
+checkout_candidate_ready + 否定答复 -> idle（清除候选）
+checkout_candidate_ready + 新设备或新租期 -> 重新查询并替换候选
+checkout_ready + 点击 prefill_order -> checkout_form_filled（仅前端表单状态）
+```
+
+肯定/否定只做去空格、去句末标点后的整句匹配，避免把包含“可以”等词的发散问题误判为确认。候选随 `Conversation.entities.checkout_candidate` 持久化，`_restore_session()` 在进程内缓存丢失时恢复。
+
+### 25.2 库存处理与动作契约
+
+- `_handle_inventory_query()` 在匹配到配置、租期完整且请求数量库存充足时，选用查询结果对应的默认配置并返回 `checkout_candidate`。
+- 配置不匹配、库存不足、日期缺失或请求数量大于可用量时不生成候选。
+- `prefill_order` 动作统一使用标签“下单”，payload 为 `camera_id/config_id/start_date/end_date/quantity`，可选携带可靠的 `shipping_address`；不得调用订单创建接口。
+- 简短肯定答复应在 FAQ、LLM 和通用意图识别之前处理；简短否定答复只在存在候选时生效。
+
+### 25.3 持久化与前端
+
+- 每轮结构化库存回答把候选写入当前 `IntentResult.entities`，进而保存到会话缓存和 `conversations.entities`。
+- 后续肯定答复沿用候选生成 `prefill_order`；否定答复持久化空候选，防止跨实例恢复旧数据。
+- 前端继续复用 `onAct('prefill_order')`：关闭 AI 层、选设备和配置、写日期与数量、查询报价、滚动到订单区域；地址缺失时由客户补填。
+- 点击动作不预留库存、不创建 `orders`、不触发资金状态或飞书同步。
+
+### 25.4 测试
+
+- [x] 单元测试覆盖首次库存候选、肯定确认、否定清除、库存不足、数量不足、紧凑“明后天”和跨实例恢复；全量 149 项通过。
+- [x] 前端静态与 375×812 浏览器测试覆盖动作标签、payload 预填顺序、设备/配置/日期/数量/报价/六项地址输入、跳转后无横向溢出与无自动下单。
+- [x] `bozipaopao.cn` 健康检查返回 v2.10.3；生产无副作用对话验证“租佳能R10明后天 → 对”，第一轮和确认轮均返回 `prefill_order`，点击后下单页正确预填且控制台无错误。
