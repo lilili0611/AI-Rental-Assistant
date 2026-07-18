@@ -1,6 +1,8 @@
 """正式域名访问时，客户前端与商家后台应自然分流。"""
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -39,3 +41,12 @@ def test_local_admin_path_still_serves_admin_frontend():
 
     assert response.status_code == 200
     assert "猫猫头相机租赁 · 商家后台" in response.text
+
+
+def test_chat_action_buttons_wrap_inside_the_assistant_bubble():
+    html = Path("app/static/index.html").read_text(encoding="utf-8")
+
+    assert ".acts button{" in html
+    assert "max-width:100%;min-width:0;height:auto;min-height:44px" in html
+    assert "font-size:12px;line-height:1.45;white-space:normal" in html
+    assert "overflow-wrap:anywhere;word-break:break-word" in html

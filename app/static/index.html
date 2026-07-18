@@ -107,9 +107,11 @@
   .msgs{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:4px 2px}
   .bub{max-width:86%;padding:11px 14px;border-radius:18px;white-space:pre-wrap;font-size:14px;line-height:1.6;animation:pop .25s var(--bounce);font-weight:500}
   .bub.u{align-self:flex-end;background:var(--brand);color:#fff;border-bottom-right-radius:6px}
-  .bub.a{align-self:flex-start;background:var(--surface-2);color:var(--ink);border-bottom-left-radius:6px}
+  .bub.a{align-self:flex-start;min-width:0;background:var(--surface-2);color:var(--ink);border-bottom-left-radius:6px}
   .bub .intent{font-size:11px;opacity:.65;margin-bottom:4px}
-  .acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .acts{display:flex;flex-wrap:wrap;gap:8px;width:100%;max-width:100%;min-width:0;margin-top:8px}
+  .acts button{flex:0 1 auto;width:auto;max-width:100%;min-width:0;height:auto;min-height:44px;padding:8px 14px;
+    font-size:12px;line-height:1.45;white-space:normal;overflow-wrap:anywhere;word-break:break-word;text-align:left;justify-content:flex-start}
   .consult-start{align-self:stretch;display:flex;flex-direction:column;gap:10px}
   .consult-start .bub{max-width:100%;font-weight:700}
   .route-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}

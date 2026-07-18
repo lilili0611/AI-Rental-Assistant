@@ -1,8 +1,8 @@
 # 相机租赁 AI 助手系统
 
-对接飞书数据、面向客户与内部员工的 AI 租赁管理助手。当前 **v2.9** 已实现四类咨询路由、猫猫头主动导购与租前、租中、租后全流程陪伴。
+对接飞书数据、面向客户与内部员工的 AI 租赁管理助手。当前 **v2.9.1** 已实现四类咨询路由、猫猫头主动导购与租前、租中、租后全流程陪伴，并修复移动端问题按钮溢出。
 
-线上地址：[https://bozipaopao.cn/](https://bozipaopao.cn/)（Vercel 托管，当前版本 v2.9.0）。
+线上地址：[https://bozipaopao.cn/](https://bozipaopao.cn/)（Vercel 托管，当前版本 v2.9.1）。
 
 > 配套文档：[PRD](files/PRD_相机租赁AI助手.md) · [Spec](files/Spec_相机租赁AI助手.md)
 
