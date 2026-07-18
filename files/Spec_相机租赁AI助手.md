@@ -1724,4 +1724,4 @@ cancelled / completed + customer_delete -> 原状态不变，customer_deleted_at
 ### 28.3 测试
 
 - 静态测试锁定输入 shell、图标按钮、48px 触控区、无旧版整行 `.voice-hold`，并保留语音降级与视口测试。
-- 全量 161 项通过；375×812 Chromium 实测麦克风位于输入框右侧、发送按钮位于最右侧，页面无横向溢出、键盘发送成功、控制台无错误。
+- 全量 161 项通过；`bozipaopao.cn/health` 返回 v2.10.6；375×812 生产域名 Chromium 实测麦克风位于输入框右侧、发送按钮位于最右侧，页面无横向溢出、键盘输入成功、控制台无错误。
