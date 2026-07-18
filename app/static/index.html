@@ -34,7 +34,8 @@
   .logo{display:flex;align-items:center;gap:11px}
   .logo .mark{width:54px;height:56px;display:grid;place-items:center;flex:none}
   .logo h1{font-size:22px;color:var(--brand)}.logo .sub{font-size:12px;color:var(--ink-2);font-family:"Caveat",cursive;font-size:15px}
-  .login{display:flex;gap:8px;align-items:center}
+  .login{display:flex;gap:8px;align-items:center;min-width:0}
+  .login-email{width:190px}.login-password{width:120px}
   .who{font-size:13px;color:var(--ink-2);display:flex;align-items:center;gap:6px}
   .who .dot{width:9px;height:9px;border-radius:50%;background:var(--ink-3)}
   .who.on .dot{background:var(--mint);box-shadow:0 0 0 4px var(--ok-50)}
@@ -135,8 +136,12 @@
     button:hover,.cam:hover{transform:none}
   }
 	  @media(max-width:600px){
-	    .hbar{padding:11px 14px}.wrap{padding:16px 14px}
-	    .login input{width:132px}.grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+	    .hbar{padding:11px 14px;align-items:flex-start}.wrap{padding:16px 14px}
+	    .logo,.login{width:100%;min-width:0}
+	    .login{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+	    .login .who{grid-column:1/-1;white-space:nowrap}
+	    .login input,.login button{width:100%;min-width:0}
+	    .grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
 	    .quote .total .big{font-size:24px}.logo h1{font-size:19px}.route-grid{grid-template-columns:1fr}
 	  }
 </style>
@@ -193,8 +198,8 @@
     </div>
 	    <div class="login">
 	      <span class="who" id="who"><span class="dot"></span>未登录</span>
-	      <input id="email" type="email" placeholder="邮箱" value="demo@example.com" style="width:190px" aria-label="邮箱" />
-	      <input id="password" type="password" placeholder="密码" value="demo1234" style="width:120px" aria-label="密码" onkeydown="if(event.key==='Enter')login()" />
+	      <input class="login-email" id="email" type="email" placeholder="邮箱" value="demo@example.com" aria-label="邮箱" />
+	      <input class="login-password" id="password" type="password" placeholder="密码" value="demo1234" aria-label="密码" onkeydown="if(event.key==='Enter')login()" />
 	      <button onclick="login()">登录</button>
 	      <button class="ghost" onclick="register()">注册</button>
 	    </div>

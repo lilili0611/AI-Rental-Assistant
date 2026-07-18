@@ -50,3 +50,15 @@ def test_chat_action_buttons_wrap_inside_the_assistant_bubble():
     assert "max-width:100%;min-width:0;height:auto;min-height:44px" in html
     assert "font-size:12px;line-height:1.45;white-space:normal" in html
     assert "overflow-wrap:anywhere;word-break:break-word" in html
+
+
+def test_mobile_login_uses_shrinkable_two_column_grid_without_inline_widths():
+    html = Path("app/static/index.html").read_text(encoding="utf-8")
+
+    assert 'class="login-email"' in html
+    assert 'class="login-password"' in html
+    assert 'style="width:190px"' not in html
+    assert 'style="width:120px"' not in html
+    assert ".login{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}" in html
+    assert ".login .who{grid-column:1/-1;white-space:nowrap}" in html
+    assert ".login input,.login button{width:100%;min-width:0}" in html
