@@ -25,7 +25,14 @@ from app.intent.recognizer import AUTH_REQUIRED, MONEY_SENSITIVE, IntentResult
 from app.knowledge_base import faq, guide
 from app.models.camera import Camera, CameraConfig
 from app.models.conversation import Conversation
-from app.services import damage_support, inventory_service, pricing_service, sales_guide, usage_support
+from app.services import (
+    consultation_routes,
+    damage_support,
+    inventory_service,
+    pricing_service,
+    sales_guide,
+    usage_support,
+)
 from app.services.session_store import get_session_store
 
 
@@ -227,14 +234,45 @@ def handle_message(
     actions = []
     answer_source = "business_data"
 
+    unreasonable = guide.is_unreasonable(message)
+    consultation = consultation_routes.enter(message) if not unreasonable else None
+    common_answer = (
+        consultation_routes.answer_common(message)
+        if not unreasonable and consultation is None
+        else None
+    )
+
     # 1. 不合理请求优先拦截，不进入知识库或 LLM，也不提供转接动作。
-    if guide.is_unreasonable(message):
+    if unreasonable:
         intent = IntentResult(intent="customer_service", confidence=1.0, source="rule")
         text = guide.CUSTOMER_SERVICE_RESPONSE
         actions = []
         answer_source = "customer_service"
+    # 2. 四类一级咨询入口只做确定性导航，不调用 LLM。
+    elif consultation:
+        session["sales_journey"] = {}
+        intent = IntentResult(
+            intent=consultation["intent"],
+            confidence=1.0,
+            entities={"consultation_route": consultation["route"]},
+            source="workflow",
+        )
+        text = consultation["text"]
+        actions = consultation["actions"]
+        answer_source = "workflow"
+    # 3. 补齐页面能力可确定回答、但 FAQ 未覆盖的下单指引。
+    elif common_answer:
+        intent = IntentResult(
+            intent=common_answer["intent"],
+            confidence=1.0,
+            entities={"consultation_route": "order"},
+            source="business_data",
+        )
+        text = common_answer["text"]
+        actions = common_answer["actions"]
+        answer_source = "business_data"
     else:
-        # 2. 损坏与赔付问题优先展示业务方标准图，不由 AI 自动定损。
+        # 4. 损坏与赔付问题优先展示业务方标准图，不由 AI 自动定损。
         damage = damage_support.answer(message)
         if damage:
             intent = IntentResult(
@@ -264,35 +302,35 @@ def handle_message(
                     else "knowledge_base"
                 )
             else:
-                # 4. 主动导购流程优先处理“推荐/怎么选”等需求，每轮只反问一个信息。
-                guided = sales_guide.process(
-                    db, message, session.setdefault("sales_journey", {})
-                )
-                if guided:
-                    session["sales_journey"] = guided["journey"]
+                # 6. 客服知识库优先，命中时原样返回，不调用导购流程或 LLM 润色。
+                knowledge_match = faq.search(message)
+                if knowledge_match:
                     intent = IntentResult(
-                        intent="guided_sales",
-                        confidence=0.95,
-                        entities={"sales_journey": guided["journey"]},
-                        source="workflow",
+                        intent="knowledge_qa",
+                        confidence=knowledge_match.score,
+                        entities={"knowledge_entry_id": knowledge_match.entry.entry_id},
+                        source="knowledge_base",
                     )
-                    text = guided["text"]
-                    actions = guided.get("actions", [])
-                    answer_source = "workflow"
+                    text = knowledge_match.entry.answer
+                    answer_source = "knowledge_base"
                 else:
-                    # 5. 客服知识库优先，命中时原样返回，不调用 LLM 润色。
-                    knowledge_match = faq.search(message)
-                    if knowledge_match:
+                    # 7. 知识库未覆盖的选购需求进入主动导购，每轮只反问一个信息。
+                    guided = sales_guide.process(
+                        db, message, session.setdefault("sales_journey", {})
+                    )
+                    if guided:
+                        session["sales_journey"] = guided["journey"]
                         intent = IntentResult(
-                            intent="knowledge_qa",
-                            confidence=knowledge_match.score,
-                            entities={"knowledge_entry_id": knowledge_match.entry.entry_id},
-                            source="knowledge_base",
+                            intent="guided_sales",
+                            confidence=0.95,
+                            entities={"sales_journey": guided["journey"]},
+                            source="workflow",
                         )
-                        text = knowledge_match.entry.answer
-                        answer_source = "knowledge_base"
+                        text = guided["text"]
+                        actions = guided.get("actions", [])
+                        answer_source = "workflow"
                     else:
-                        # 6. 设备、实时库存、价格与订单继续走结构化业务能力。
+                        # 8. 设备、实时库存、价格与订单继续走结构化业务能力。
                         intent = recognizer.recognize(message)
                         if multi_turn:
                             merged = {

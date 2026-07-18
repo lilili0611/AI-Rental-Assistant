@@ -44,7 +44,7 @@ def test_shopping_scenarios_support_paraphrases():
         assert match.entry.entry_id == entry_id
 
 
-def test_unknown_reasonable_question_uses_marked_50_char_llm_fallback(db, monkeypatch):
+def test_unknown_reasonable_question_uses_marked_180_char_llm_fallback(db, monkeypatch):
     monkeypatch.setattr(guide.llm, "llm_available", lambda: True)
     long_answer = "建议优先选择轻便机身和带防抖的标准变焦镜头，兼顾夜景、人像与旅行携带，先确认重量再决定。" * 2
     monkeypatch.setattr(guide.llm, "chat_completion", lambda *args, **kwargs: long_answer)

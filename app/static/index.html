@@ -110,6 +110,14 @@
   .bub.a{align-self:flex-start;background:var(--surface-2);color:var(--ink);border-bottom-left-radius:6px}
   .bub .intent{font-size:11px;opacity:.65;margin-bottom:4px}
   .acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .consult-start{align-self:stretch;display:flex;flex-direction:column;gap:10px}
+  .consult-start .bub{max-width:100%;font-weight:700}
+  .route-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  button.route-btn{height:auto;min-height:48px;padding:9px 12px;border-radius:15px;background:#fff;color:var(--ink);border:2px solid var(--line-2);
+    box-shadow:none;justify-content:flex-start;text-align:left;white-space:normal;line-height:1.35}
+  button.route-btn:hover{color:var(--brand);border-color:var(--brand);background:var(--brand-50)}
+  .route-no{width:25px;height:25px;border-radius:50%;display:grid;place-items:center;flex:none;background:var(--brand);color:#fff;
+    font-family:"Sora",sans-serif;font-size:12px;font-weight:800}
   .chatbar{display:flex;gap:8px;margin-top:10px}.chatbar input{flex:1}
   .typing{align-self:flex-start;color:var(--ink-3);font-size:13px;display:flex;align-items:center;gap:7px;padding:2px}
   /* toast */
@@ -127,7 +135,7 @@
 	  @media(max-width:600px){
 	    .hbar{padding:11px 14px}.wrap{padding:16px 14px}
 	    .login input{width:132px}.grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
-	    .quote .total .big{font-size:24px}.logo h1{font-size:19px}
+	    .quote .total .big{font-size:24px}.logo h1{font-size:19px}.route-grid{grid-template-columns:1fr}
 	  }
 </style>
 </head>
@@ -221,7 +229,15 @@
   <div class="card chat reveal">
     <div class="sechead"><span class="n" style="background:transparent;box-shadow:none;width:38px;height:38px"><img src="/static/mascot.png" alt="猫猫" style="width:38px;height:38px;object-fit:contain"></span><h2>猫猫小助手</h2></div>
     <div class="msgs" id="msgs">
-      <div class="bub a">喵～我是你的全流程陪伴助手 🐱 我会先了解拍摄场景，再帮你选设备、查库存、问免押并带入下单；发货后还能查看物流、使用指南和归还提醒。</div>
+      <div class="consult-start">
+        <div class="bub a">喵～我是猫猫小助手 🐱 快来咨询我吧</div>
+        <div class="route-grid" aria-label="选择咨询类型">
+          <button type="button" class="route-btn" onclick="send('下单问题咨询')"><span class="route-no">1</span><span>下单问题咨询</span></button>
+          <button type="button" class="route-btn" onclick="send('免押问题咨询')"><span class="route-no">2</span><span>免押问题咨询</span></button>
+          <button type="button" class="route-btn" onclick="send('理赔问题咨询')"><span class="route-no">3</span><span>理赔问题咨询</span></button>
+          <button type="button" class="route-btn" onclick="send('设备选择咨询')"><span class="route-no">4</span><span>设备选择咨询</span></button>
+        </div>
+      </div>
     </div>
     <div class="chatbar">
       <input id="chatin" placeholder="想租点啥？问我吧…" onkeydown="if(event.key==='Enter')send()" aria-label="聊天输入"/>
@@ -359,6 +375,8 @@ async function onAct(a){
   }else if(a.action==='open_url'){
     const url=(a.payload||{}).url||'';
     if(/^https:\/\//.test(url)||/^\/static\/[A-Za-z0-9._/-]+$/.test(url))window.open(url,'_blank','noopener');
+  }else if(a.action==='scroll_order'){
+    $('cams').scrollIntoView({behavior:'smooth',block:'start'});toast('请先选择一台设备');
   }else if(a.action==='order_create')toast('请在左侧选择配置和日期，点“立即下单”');
   else if(a.action.startsWith('confirm:'))send('确认');else send(a.label);
 }
