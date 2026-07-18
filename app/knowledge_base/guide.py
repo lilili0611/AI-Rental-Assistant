@@ -22,6 +22,11 @@ _SYSTEM_PROMPT = """你是“猫猫头”相机租赁全流程陪伴助手，提
 5. 故障排查只允许关机重启、检查电池/存储卡/镜头连接等非拆机步骤；进水、摔落、异味、发热或拆机时只答“请咨询客服”。
 6. 不确定时只答“请咨询客服”。"""
 
+_SIDE_QUESTION_PROMPT = """当前问题是导购流程中的临时发散问题。
+只回答用户当前问题，不继续索要起租日或归还日。
+对于审美风格、构图、拍摄技巧、一般设备类型和公开相机型号，应基于通用知识直接给出建议，不要因为缺少租期而拒答。
+通用建议不得表述为本店现货、价格或履约承诺；只有确实需要确认本店库存、价格、赔偿、信用资格或订单状态时才答“请咨询客服”。"""
+
 _UNREASONABLE_PATTERNS = tuple(
     re.compile(pattern, re.IGNORECASE)
     for pattern in (
@@ -63,12 +68,19 @@ def _clean_body(text: str) -> str:
     return body[:MAX_LLM_BODY_LENGTH].rstrip("，,；;、")
 
 
-def generate_answer(message: str, history: Optional[list[dict]] = None) -> Optional[str]:
+def generate_answer(
+    message: str,
+    history: Optional[list[dict]] = None,
+    side_question: bool = False,
+) -> Optional[str]:
     """生成不含标记的短正文；不可用、失败或需客服确认时返回 None。"""
     if not llm.llm_available():
         return None
 
-    messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+    system_prompt = _SYSTEM_PROMPT
+    if side_question:
+        system_prompt = f"{system_prompt}\n\n{_SIDE_QUESTION_PROMPT}"
+    messages = [{"role": "system", "content": system_prompt}]
     for item in (history or [])[-4:]:
         role = item.get("role")
         content = item.get("content")

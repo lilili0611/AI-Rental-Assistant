@@ -120,12 +120,14 @@ def test_side_question_while_waiting_dates_uses_llm_and_preserves_journey(
 ):
     sid = _reach_date_step(db, monkeypatch)
     before = dict(get_session_store().get(sid)["sales_journey"])
+    captured = {}
     monkeypatch.setattr(guide.llm, "llm_available", lambda: True)
-    monkeypatch.setattr(
-        guide.llm,
-        "chat_completion",
-        lambda *args, **kwargs: "想拍复古人像，可优先选择带胶片模拟或色彩直出的轻便相机，再搭配大光圈镜头营造柔和背景虚化。",
-    )
+
+    def answer(messages, **kwargs):
+        captured["messages"] = messages
+        return "想拍复古人像，可优先选择带胶片模拟或色彩直出的轻便相机，再搭配大光圈镜头营造柔和背景虚化。"
+
+    monkeypatch.setattr(guide.llm, "chat_completion", answer)
 
     result = chat_service.handle_message(
         db, "你可以给我推荐一个拍人很复古的相机吗", session_id=sid
@@ -134,6 +136,8 @@ def test_side_question_while_waiting_dates_uses_llm_and_preserves_journey(
     assert result["detected_intent"] == "guided_sales_side_question"
     assert result["answer_source"] == "llm"
     assert result["ai_response"].startswith(f"{guide.AI_LABEL}\n")
+    assert "不继续索要起租日或归还日" in captured["messages"][0]["content"]
+    assert "公开相机型号" in captured["messages"][0]["content"]
     assert [action["label"] for action in result["next_actions"]] == [
         "继续填写租期",
         "重新选择设备",

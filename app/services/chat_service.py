@@ -323,7 +323,7 @@ def handle_message(
                     # 7. 等待租期时的新问题暂停导购，直接进入 LLM 安全兜底。
                     if side_question:
                         text, actions, answer_source = _fallback_or_customer_service(
-                            message, session.get("history", [])
+                            message, session.get("history", []), side_question=True
                         )
                         intent = IntentResult(
                             intent="guided_sales_side_question",
@@ -419,9 +419,11 @@ def handle_message(
 
 
 def _fallback_or_customer_service(
-    message: str, history: list[dict]
+    message: str,
+    history: list[dict],
+    side_question: bool = False,
 ) -> tuple[str, list[dict], str]:
-    body = guide.generate_answer(message, history)
+    body = guide.generate_answer(message, history, side_question=side_question)
     if body:
         return guide.mark_ai_generated(body), [], "llm"
     return (
